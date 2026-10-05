@@ -1,0 +1,6 @@
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-keepattributes *Annotation*, InnerClasses
+-keep,includedescriptorclasses class com.claudechat.**$$serializer { *; }
+-keepclassmembers class com.claudechat.** { *** Companion; }
+-keepclasseswithmembers class com.claudechat.** { kotlinx.serialization.KSerializer serializer(...); }
