@@ -239,4 +239,5 @@
     <string name="font_sharetech">Share Tech Mono</string>
     <string name="font_majormono">Major Mono</string>
     <string name="font_michroma">Michroma (geniş)</string>
+    <string name="ov_style_bubble">Yüzen balon</string>
 </resources>

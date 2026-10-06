@@ -77,6 +77,10 @@ object Prefs {
     lateinit var pillColor: S   // pill background: black / white
     lateinit var pillGap: S      // extra room around the camera ring, dp (0..8)
     lateinit var pillOutfit: S   // mascot outfit: none / wizard / crown / party / bow
+    lateinit var bubbleX: S      // floating bubble position, px
+    lateinit var bubbleY: S
+    lateinit var chatBg: S       // chat-screen background: none / dusk / mint / rose / sand / grid / stars
+    lateinit var bubbleStyle: S  // message bubbles: soft / round / square / outline
     lateinit var dynamic: B
     lateinit var keepAlive: B
     lateinit var autoStart: B
@@ -114,6 +118,10 @@ object Prefs {
         pillColor = S("pillColor", "black")
         pillGap = S("pillGap", "1")
         pillOutfit = S("pillOutfit", "none")
+        bubbleX = S("bubbleX", "")
+        bubbleY = S("bubbleY", "")
+        chatBg = S("chatBg", "none")
+        bubbleStyle = S("bubbleStyle", "soft")
         dynamic = B("dynamic", false)
         keepAlive = B("keepAlive", true)
         autoStart = B("autoStart", true)

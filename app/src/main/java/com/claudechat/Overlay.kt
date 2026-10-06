@@ -2,6 +2,7 @@ package com.claudechat
 
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
+import android.content.Intent
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Canvas
@@ -35,6 +36,8 @@ class Overlay(base: Context) {
     private var mascot: ImageView? = null
     private var spinner: ProgressBar? = null
     private var mark: TextView? = null
+    private var term: TextView? = null            // Termux-style ">_" shown on the right while a shell command runs
+    private var blink: ValueAnimator? = null
     private var label: TextView? = null
     private var sub: TextView? = null
     private var bar: View? = null
@@ -71,7 +74,7 @@ class Overlay(base: Context) {
     }
 
     /** The mascot picture: awake or asleep (closed eyes), with the chosen outfit on its head. */
-    private fun mascotDrawable(sleep: Boolean): android.graphics.drawable.Drawable {
+    private fun mascotDrawable(sleep: Boolean, computer: Boolean = false): android.graphics.drawable.Drawable {
         val hat = when (Prefs.pillOutfit.value) {
             "wizard" -> R.drawable.ic_hat_wizard
             "crown" -> R.drawable.ic_hat_crown
@@ -80,6 +83,7 @@ class Overlay(base: Context) {
             else -> 0
         }
         fun d(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate()
+        if (computer) return if (hat == 0) d(R.drawable.ic_mascot_pc) else android.graphics.drawable.LayerDrawable(arrayOf(d(R.drawable.ic_mascot_pc), d(hat)))
         if (hat == 0) return d(if (sleep) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot)
         // outfit drawables share a taller 20x18 canvas so the hat fits above the head
         return android.graphics.drawable.LayerDrawable(arrayOf(d(if (sleep) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), d(hat)))
@@ -116,14 +120,27 @@ class Overlay(base: Context) {
         lastStyleIn = styleIn; cache = Triple(st, det, last)
         if (style == "off" || !Settings.canDrawOverlays(ctx)) { hide(); return }
         if (style != this.style || root == null || black != (blackLayer != null)) { hide(); if (black) showBlack(); show(style) }
-        val c = color(st)
+        val shell = st == Status.Working && Engine.shell.value
+        val c = if (shell) 0xFF2196F3.toInt() else color(st)
         val working = st.running
         spinner?.visibility = if (working && style != "pill") View.VISIBLE else View.GONE
         spinner?.indeterminateTintList = ColorStateList.valueOf(c)
         ring?.set(c, working, st != Status.Idle)
         mark?.visibility = if (working) View.GONE else View.VISIBLE
+        term?.let { t ->
+            // like the colon of a digital clock: the underscore comes and goes
+            if (shell && style == "pill") {
+                t.visibility = View.VISIBLE
+                if (blink == null) blink = ValueAnimator.ofFloat(0f, 1f).apply {
+                    duration = 1000; repeatCount = ValueAnimator.INFINITE
+                    var on = true
+                    addUpdateListener { val n = (it.animatedValue as Float) < 0.5f; if (n != on) { on = n; t.text = if (n) ">_" else "> " } }
+                    start()
+                }
+            } else { blink?.cancel(); blink = null; t.visibility = View.GONE; t.text = ">_" }
+        }
         mark?.text = markOf(st); mark?.setTextColor(c)
-        mascot?.setImageDrawable(mascotDrawable(st == Status.Idle)) // idle: eyes closed + "z"
+        mascot?.setImageDrawable(mascotDrawable(st == Status.Idle, st == Status.Background || shell)) // background shell: laptop + blue face; idle: eyes closed + "z"
         label?.text = text(st, det)
         if (style == "pill") {
             // idle: the mascot sleeps in the pill (eyes closed, "z"); done turns into sleep after a moment
@@ -145,7 +162,7 @@ class Overlay(base: Context) {
         (root as? LinearLayout)?.let { r ->
             if (working) r.animate().alpha(0.9f).setDuration(1800).withEndAction { r.animate().alpha(1f).setDuration(1800).start() }.start() else { r.animate().cancel(); r.alpha = 1f }
         }
-        bob?.let { if (working) { if (!it.isRunning) it.start() } else { it.cancel(); mascot?.translationY = 0f; mascot?.rotation = 0f } }
+        bob?.let { if (working && st != Status.Background && !shell) { if (!it.isRunning) it.start() } else { it.cancel(); mascot?.translationY = 0f; mascot?.rotation = 0f } }
         if (blackLayer != null) updateBlack(st, det, last)
         // Eyes animation on status change (start/done)
         if (st != lastStatus) {
@@ -368,6 +385,11 @@ class Overlay(base: Context) {
                 mark = TextView(ctx).apply { textSize = 15f; gravity = Gravity.CENTER; setTypeface(typeface, android.graphics.Typeface.BOLD) }
                 icon.addView(spinner, FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
                 icon.addView(mark, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+                term = TextView(ctx).apply {
+                    text = ">_"; textSize = 13f; gravity = Gravity.CENTER; typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
+                    setTextColor(0xFF2196F3.toInt()); visibility = View.GONE
+                }
+                icon.addView(term, FrameLayout.LayoutParams(dp(30), dp(20), Gravity.CENTER))
                 box.addView(icon, lp(side))
                 label = TextView(ctx) // off-screen: the pill is a single strip
                 bob = dancer(mascot!!, dp(2).toFloat())
@@ -388,6 +410,45 @@ class Overlay(base: Context) {
                     if (Build.VERSION.SDK_INT >= 30) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                     else if (Build.VERSION.SDK_INT >= 28) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 })
+            }
+            "bubble" -> { // a draggable round head: tap opens the chat, drag moves it, it snaps to the nearest side
+                val size = dp(58)
+                val frame = FrameLayout(ctx).apply {
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (Prefs.pillColor.value == "white") Color.WHITE else Color.BLACK) }
+                    elevation = dp(6).toFloat()
+                }
+                ring = RingView(ctx); frame.addView(ring, FrameLayout.LayoutParams(size, size))
+                mascot = ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot) }
+                frame.addView(mascot, FrameLayout.LayoutParams(dp(36), dp(28), Gravity.CENTER))
+                spinner = null; mark = null; label = TextView(ctx); bob = dancer(mascot!!, dp(2).toFloat())
+                root = frame
+                val lp = params(size, size, base or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, Gravity.TOP or Gravity.START).also {
+                    it.x = Prefs.bubbleX.value.toIntOrNull() ?: (screenWidth() - size - dp(8)); it.y = Prefs.bubbleY.value.toIntOrNull() ?: (screenHeight() / 3)
+                }
+                var dx = 0f; var dy = 0f; var sx = 0; var sy = 0; var moved = false
+                frame.setOnTouchListener { v, e ->
+                    when (e.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> { dx = e.rawX; dy = e.rawY; sx = lp.x; sy = lp.y; moved = false; true }
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            if (Math.abs(e.rawX - dx) > dp(6) || Math.abs(e.rawY - dy) > dp(6)) moved = true
+                            if (moved) { lp.x = (sx + (e.rawX - dx)).toInt(); lp.y = (sy + (e.rawY - dy)).toInt(); try { wm.updateViewLayout(v, lp) } catch (_: Exception) {} }
+                            true
+                        }
+                        android.view.MotionEvent.ACTION_UP -> {
+                            if (!moved) {
+                                ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                            } else {
+                                lp.x = if (lp.x + size / 2 < screenWidth() / 2) dp(4) else screenWidth() - size - dp(4)
+                                lp.y = lp.y.coerceIn(statusBarHeight(), screenHeight() - size - dp(24))
+                                try { wm.updateViewLayout(v, lp) } catch (_: Exception) {}
+                                Prefs.bubbleX.value = lp.x.toString(); Prefs.bubbleY.value = lp.y.toString()
+                            }
+                            true
+                        }
+                        else -> false
+                    }
+                }
+                wm.addView(frame, lp)
             }
             else -> { // curtain
                 val col = LinearLayout(ctx).apply {
@@ -423,7 +484,7 @@ class Overlay(base: Context) {
     }
 
     fun hide() {
-        pulse?.cancel(); bob?.cancel(); eyes?.cancel(); bBob?.cancel()
+        pulse?.cancel(); bob?.cancel(); eyes?.cancel(); bBob?.cancel(); blink?.cancel(); blink = null; term = null
         root?.let { try { wm.removeView(it) } catch (e: Exception) { } }
         blackLayer?.let { try { wm.removeView(it) } catch (e: Exception) { } }; blackLayer = null
         bStatus = null; bDet = null; bLast = null; bBatt = null; bMascot = null; bBob = null

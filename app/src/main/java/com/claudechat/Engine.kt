@@ -31,6 +31,9 @@ data class Msg(
     val detail: String = "",     // expandable tool details (command, diff...)
 )
 
+/** One sub-agent (Task/Agent tool call) of the running turn: what it is doing right now and whether it finished. */
+data class AgentInfo(val id: String, val title: String, val kind: String, val activity: String = "", val tools: Int = 0, val done: Boolean = false)
+
 data class Chat(val id: String, val title: String, val session: String, val cost: Double, val updated: Long)
 
 /** Everything one chat needs to keep running while another chat is on screen. */
@@ -39,6 +42,8 @@ private class Run(val id: String) {
     val status = MutableStateFlow(Status.Idle)
     val detail = MutableStateFlow("")
     val cost = MutableStateFlow(0.0)   // accumulated cost of this chat, USD
+    val agents = MutableStateFlow<List<AgentInfo>>(emptyList())
+    val shell = MutableStateFlow(false) // a Bash command is running right now
     var nextId = 1L
     var job: Job? = null
     @Volatile var call: Call? = null
@@ -81,6 +86,8 @@ object Engine {
     val status: StateFlow<Status> = current(Status.Idle) { it.status }
     val detail: StateFlow<String> = current("") { it.detail }
     val cost: StateFlow<Double> = current(0.0) { it.cost }
+    val agents: StateFlow<List<AgentInfo>> = current(emptyList()) { it.agents }
+    val shell: StateFlow<Boolean> = current(false) { it.shell }
 
     private fun msgFile(id: String) = File(dir, "$id.json")
 
@@ -278,6 +285,20 @@ object Engine {
         } catch (e: IOException) { -1 }
     }
 
+    /** Sub-folders of [path] inside Ubuntu (through the bridge): (resolved path, parent, names), or null when unreachable. */
+    suspend fun ls(path: String): Triple<String, String, List<String>>? = withContext(Dispatchers.IO) {
+        try {
+            http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build()
+                .newCall(Request.Builder().url(url("/ls?p=" + java.net.URLEncoder.encode(path, "UTF-8"))).header("X-Token", Termux.cleanToken()).build())
+                .execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val o = JSONObject(resp.body!!.string())
+                    val a = o.getJSONArray("dirs")
+                    Triple(o.getString("path"), o.getString("parent"), (0 until a.length()).map { a.getString(it) })
+                }
+        } catch (e: Exception) { null }
+    }
+
     /** Starts the bridge through Termux and waits for it. Returns an error string or null. */
     suspend fun startBridgeAndWait(onDetail: (String) -> Unit = {}): String? {
         onDetail(appStr(R.string.starting_bridge))
@@ -315,6 +336,7 @@ object Engine {
 
     private suspend fun execute(r: Run, prompt: String) {
         r.curId = null; r.streamed = false; r.anyText = false; r.gotResult = false
+        r.agents.value = emptyList(); r.shell.value = false
         try {
             val p = ping()
             if (p != 200) {
@@ -374,9 +396,9 @@ object Engine {
                 when (e.optString("type")) {
                     "message_start" -> { r.curId = null; r.streamed = false }
                     "content_block_start" -> when (e.optJSONObject("content_block")?.optString("type")) {
-                        "tool_use" -> setDetail(r, appStr(R.string.using_tool, e.getJSONObject("content_block").optString("name")))
-                        "thinking" -> setDetail(r, appStr(R.string.thinking))
-                        "text" -> setDetail(r, appStr(R.string.writing))
+                        "tool_use" -> { val n = e.getJSONObject("content_block").optString("name"); r.shell.value = n == "Bash"; setDetail(r, appStr(R.string.using_tool, n)) }
+                        "thinking" -> { r.shell.value = false; setDetail(r, appStr(R.string.thinking)) }
+                        "text" -> { r.shell.value = false; setDetail(r, appStr(R.string.writing)) }
                     }
                     "content_block_delta" -> {
                         val d = e.getJSONObject("delta")
@@ -392,12 +414,42 @@ object Engine {
                         "text" -> if (!r.streamed && b.optString("text").isNotBlank()) appendClaude(r, b.getString("text"))
                         "tool_use" -> {
                             val name = b.optString("name")
-                            add(r, Role.Tool, toolSummary(name, b.optJSONObject("input")), detail = toolDetail(b.optJSONObject("input")))
+                            val inp = b.optJSONObject("input")
+                            if (name == "Task" || name == "Agent") {
+                                val title = inp?.optString("description").orEmpty().ifBlank { inp?.optString("prompt").orEmpty().lineSequence().firstOrNull().orEmpty() }.take(80).ifBlank { name }
+                                r.agents.value = r.agents.value + AgentInfo(b.optString("id"), title, inp?.optString("subagent_type").orEmpty().ifBlank { "agent" })
+                            }
+                            r.shell.value = name == "Bash"
+                            add(r, Role.Tool, toolSummary(name, inp), detail = toolDetail(inp))
                             setDetail(r, appStr(R.string.using_tool, name))
                         }
                     }
                 }
                 r.curId = null
+            } else {
+                // a sub-agent is talking: keep its card up to date
+                val pid = o.optString("parent_tool_use_id")
+                val content = o.optJSONObject("message")?.optJSONArray("content") ?: JSONArray()
+                var act = ""; var used = 0
+                for (i in 0 until content.length()) {
+                    val b = content.getJSONObject(i)
+                    when (b.optString("type")) {
+                        "tool_use" -> { act = toolSummary(b.optString("name"), b.optJSONObject("input")); used++ }
+                        "text" -> if (act.isEmpty()) act = b.optString("text").lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(90)
+                    }
+                }
+                if (act.isNotEmpty() || used > 0) r.agents.value = r.agents.value.map { if (it.id == pid) it.copy(activity = act.ifEmpty { it.activity }, tools = it.tools + used) else it }
+            }
+            "user" -> if (!sub) { // tool results: a finished Task/Agent call = that agent is done
+                r.shell.value = false
+                val content = o.optJSONObject("message")?.optJSONArray("content")
+                if (content != null) for (i in 0 until content.length()) {
+                    val b = content.optJSONObject(i) ?: continue
+                    if (b.optString("type") == "tool_result") {
+                        val id = b.optString("tool_use_id")
+                        r.agents.value = r.agents.value.map { if (it.id == id) it.copy(done = true) else it }
+                    }
+                }
             }
             "result" -> {
                 r.gotResult = true
@@ -466,6 +518,7 @@ object Engine {
     }
 
     private fun finish(r: Run, st: Status) {
+        r.shell.value = false; r.agents.value = r.agents.value.map { it.copy(done = true) }
         setStatus(r, st)
         save(r)
         // the island/overlay already shows "done"; a second notification would just duplicate it
@@ -475,6 +528,7 @@ object Engine {
     }
 
     private fun fail(r: Run, text: String, st: Status = Status.Error, action: Boolean = st == Status.Offline) {
+        r.shell.value = false
         add(r, Role.Error, text, action)
         setStatus(r, st)
         save(r)

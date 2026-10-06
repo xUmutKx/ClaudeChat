@@ -74,7 +74,7 @@ fun statusText(s: Status, det: String) = when (s) {
 val Draft = mutableStateOf("")
 
 @Composable
-fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit) {
+fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit = {}) {
     val msgs by Engine.messages.collectAsState()
     val st by Engine.status.collectAsState()
     val det by Engine.detail.collectAsState()
@@ -91,6 +91,8 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit) {
     val curId by Engine.currentId.collectAsState()
     val title = chats.firstOrNull { it.id == curId }?.title.orEmpty()
     var sheet by remember { mutableStateOf(false) }
+    var custom by remember { mutableStateOf(false) }
+    val shell by Engine.shell.collectAsState()
     val items = remember(msgs) { groupMsgs(msgs) }
     val working = st == Status.Working
     val slash = if (input.startsWith("/") && !input.contains(' ')) Cmds.matching(input.drop(1)) else emptyList()
@@ -100,10 +102,12 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit) {
         // this chat looks finished but another chat still works in the background: say so (blue) instead of "Done"
         val overall by Engine.overall.collectAsState()
         val shownSt = if (st != Status.Working && overall == Status.Background) Status.Background else st
-        TopBar(title, shownSt, if (shownSt == Status.Background) Engine.overallDetail.collectAsState().value else det, model.ifEmpty { shortModel(modelSeen) }, { sheet = true }, onChats, onSettings)
+        TopBar(title, shownSt, if (shownSt == Status.Background) Engine.overallDetail.collectAsState().value else det, model.ifEmpty { shortModel(modelSeen) }, { sheet = true }, onChats, onSettings, shell) { custom = true }
         if (sheet) OptionsSheet { sheet = false }
+        if (custom) CustomizeSheet { custom = false }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (msgs.isEmpty() && !working) EmptyState()
+            ChatBackground(Modifier.fillMaxSize())
+            if (msgs.isEmpty() && !working) EmptyState(onSetup)
             LazyColumn(
                 Modifier.fillMaxSize(), reverseLayout = true,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
@@ -118,6 +122,7 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit) {
                 }
             }
         }
+        AgentsBar()
         if (slash.isNotEmpty()) Palette(slash) { input = "/${it.name} " }
         if (atts.isNotEmpty()) LazyRow(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(atts.toList(), key = { it.uri.toString() }) { a -> AttChip(a) { atts.remove(a) } }
@@ -131,17 +136,17 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit) {
 }
 
 @Composable
-private fun TopBar(title: String, st: Status, det: String, model: String, onModel: () -> Unit, onChats: () -> Unit, onSettings: () -> Unit) {
+private fun TopBar(title: String, st: Status, det: String, model: String, onModel: () -> Unit, onChats: () -> Unit, onSettings: () -> Unit, shell: Boolean, onMascot: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(42.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-                Mascot(st.running, Modifier.size(28.dp, 20.dp), sleeping = st == Status.Idle)
+            Box(Modifier.size(52.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest).clickable(onClick = onMascot), contentAlignment = Alignment.Center) {
+                Mascot(st.running, Modifier.size(36.dp, 26.dp), sleeping = st == Status.Idle, computer = st == Status.Background || shell)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(onClick = onModel)) {
                 Text(title.ifEmpty { modelTitle(model) }, fontFamily = FontFamily.Serif, fontSize = 20.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(statusColor(st)))
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(if (shell) Color(0xFF2196F3) else statusColor(st)))
                     Spacer(Modifier.width(6.dp))
                     Text((if (title.isNotEmpty()) modelTitle(model) + " · " else "") + statusText(st, det), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -164,8 +169,15 @@ object Dance {
 
 /** Mascot picture with the chosen outfit's hat on top (same pixel canvas as the pill's). */
 @Composable
-private fun MascotImg(sleeping: Boolean, modifier: Modifier) {
+private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean = false) {
     val hat = Outfit.hat(Prefs.pillOutfit.flow.collectAsState().value)
+    if (computer) { // a shell runs in the background: at the laptop, face lit blue
+        Box(modifier) {
+            Image(painterResource(R.drawable.ic_mascot_pc), null, Modifier.fillMaxSize())
+            if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxSize())
+        }
+        return
+    }
     if (hat == 0) { Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot), null, modifier); return }
     Box(modifier) {
         Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), null, Modifier.fillMaxSize())
@@ -175,7 +187,8 @@ private fun MascotImg(sleeping: Boolean, modifier: Modifier) {
 
 /** The mascot; while Claude works it dances in the same stepped frames as the notification. */
 @Composable
-fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false) {
+fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false, computer: Boolean = false) {
+    if (computer) { MascotImg(false, modifier, computer = true); return }
     if (sleeping && !working) { // idle: eyes closed and a drifting "z"
         val t = rememberInfiniteTransition(label = "zzz")
         val a by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "z")
@@ -203,7 +216,8 @@ fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false) {
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(onSetup: () -> Unit = {}) {
+    val ctx = LocalContext.current
     val bridge by Engine.bridge.collectAsState()
     val err by Engine.bridgeError.collectAsState()
     LaunchedEffect(Unit) { Engine.checkBridge() }
@@ -221,7 +235,9 @@ private fun EmptyState() {
                     Text(stringResource(if (bridge == 0) R.string.starting_bridge else R.string.checking), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
-                Button({ Engine.connect() }) { Text(stringResource(R.string.start_claude)) }
+                if (!Termux.installed(ctx)) Button(onSetup) { Text(tr("Set up from scratch", "Sıfırdan kur")) }
+                else Button({ Engine.connect() }) { Text(stringResource(R.string.start_claude)) }
+                if (Termux.installed(ctx)) TextButton(onSetup) { Text(tr("Setup guide", "Kurulum rehberi")) }
                 if (err.isNotBlank()) Text(err.take(300), Modifier.padding(top = 10.dp), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
@@ -245,7 +261,13 @@ private fun Message(m: Msg, lastInGroup: Boolean, onSettings: () -> Unit) {
             val err = m.role == Role.Error
             if (user) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-                    Surface(shape = RoundedCornerShape(20.dp), color = cs.surfaceContainerHigh, modifier = Modifier.widthIn(max = maxW)) {
+                    val bs = Prefs.bubbleStyle.flow.collectAsState().value
+                    Surface(
+                        shape = RoundedCornerShape(when (bs) { "round" -> 28.dp; "square" -> 6.dp; else -> 20.dp }),
+                        color = when (bs) { "round" -> cs.primaryContainer; "outline" -> Color.Transparent; else -> cs.surfaceContainerHigh },
+                        border = if (bs == "outline") BorderStroke(1.dp, cs.outline) else null,
+                        modifier = Modifier.widthIn(max = maxW)
+                    ) {
                         Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) { SelectionContainer { MarkdownText(m.text, cs.onSurface) } }
                     }
                 }

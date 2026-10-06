@@ -11,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -19,6 +21,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
@@ -141,7 +144,7 @@ private fun rememberTick(): Int {
 }
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, onSetup: () -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val tick = rememberTick()
@@ -162,10 +165,15 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
 
     LaunchedEffect(tick) { bridge = Engine.ping() }
 
-    var adv by remember { mutableStateOf(false) }
     var det by remember { mutableStateOf(false) }
+    var cat by rememberSaveable { mutableStateOf("conn") }
     Page(R.string.settings, onBack) {
-        Section(R.string.sec_method) {
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(listOf("conn" to tr("Connection", "Bağlantı"), "look" to tr("Look", "Görünüm"), "overlay" to tr("Overlay", "Overlay"), "black" to tr("Black screen", "Siyah ekran"), "claude" to "Claude", "alive" to tr("Stay alive", "Açık kalma"))) { (k, l) ->
+                FilterChip(cat == k, { cat = k }, { Text(l) })
+            }
+        }
+        if (cat == "conn") Section(R.string.sec_method) {
             val up = bridge == 200
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(if (up) statusColor(Status.Done) else statusColor(Status.Error)))
@@ -220,7 +228,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
             SwitchRow(R.string.auto_start, null, auto) { Prefs.autoStart.value = it }
         }
 
-        Section(R.string.sec_usage) {
+        if (cat == "conn") Section(R.string.sec_usage) {
             val p = limits.split("|")
             val rows = listOf(R.string.lim_five to 0, R.string.lim_week to 2)
             if (p.size < 4 || p[0].isEmpty() && p[2].isEmpty()) Hint(stringResource(R.string.lim_none))
@@ -238,13 +246,13 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
         }
 
 
-        Section(R.string.sec_appearance) {
+        if (cat == "look") Section(R.string.sec_appearance) {
             Choices(listOf("system" to R.string.theme_system, "light" to R.string.theme_light, "dark" to R.string.theme_dark, "amoled" to R.string.theme_amoled), theme) { Prefs.theme.value = it }
             Choices(listOf("en" to R.string.lang_en, "tr" to R.string.lang_tr), lang) { if (it != lang) { Prefs.lang.value = it; onLang() } }
         }
 
-        Section(R.string.sec_overlay) {
-            Choices(listOf("off" to R.string.ov_style_off, "pill" to R.string.ov_style_pill, "line" to R.string.ov_style_line, "curtain" to R.string.ov_style_curtain), overlay) { Prefs.overlay.value = it }
+        if (cat == "overlay") Section(R.string.sec_overlay) {
+            Choices(listOf("off" to R.string.ov_style_off, "pill" to R.string.ov_style_pill, "bubble" to R.string.ov_style_bubble, "line" to R.string.ov_style_line, "curtain" to R.string.ov_style_curtain), overlay) { Prefs.overlay.value = it }
             val dance by Prefs.danceMode.flow.collectAsState()
             Text(stringResource(R.string.dance_mode), style = MaterialTheme.typography.bodyLarge)
             Choices(listOf("steps" to R.string.dm_steps, "smooth" to R.string.dm_smooth), dance) { Prefs.danceMode.value = it }
@@ -266,7 +274,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
             }
         }
 
-        Section(R.string.sec_black) {
+        if (cat == "black") Section(R.string.sec_black) {
             val dim by Prefs.blackDim.flow.collectAsState()
             val bClock by Prefs.blackClock.flow.collectAsState()
             val bDate by Prefs.blackDate.flow.collectAsState()
@@ -298,15 +306,19 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
             OutlinedTextField(bText, { Prefs.blackText.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.black_text)) }, maxLines = 2)
         }
 
-        TextButton({ adv = !adv }) { Text(stringResource(if (adv) R.string.adv_hide else R.string.adv_show)) }
-        if (adv) {
-            Section(R.string.sec_claude) {
+        run {
+            if (cat == "claude") Section(R.string.sec_claude) {
                 Text(stringResource(R.string.perm_mode))
                 Choices(listOf("default" to R.string.mode_default, "acceptEdits" to R.string.mode_edits, "plan" to R.string.mode_plan, "bypassPermissions" to R.string.mode_bypass), mode) { Prefs.mode.value = it }
-                OutlinedTextField(Prefs.cwd.value, { Prefs.cwd.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.workdir)) }, singleLine = true)
-                OutlinedTextField(Prefs.attachDir.value, { Prefs.attachDir.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.attach_dir)) }, singleLine = true)
+                var pick by remember { mutableStateOf("") } // "cwd" / "attach": which field the folder picker fills
+                OutlinedTextField(Prefs.cwd.value, { Prefs.cwd.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.workdir)) }, singleLine = true,
+                    trailingIcon = { IconButton({ pick = "cwd" }) { Icon(Icons.Filled.Folder, tr("Browse", "Gözat")) } })
+                OutlinedTextField(Prefs.attachDir.value, { Prefs.attachDir.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.attach_dir)) }, singleLine = true,
+                    trailingIcon = { IconButton({ pick = "attach" }) { Icon(Icons.Filled.Folder, tr("Browse", "Gözat")) } })
+                if (pick.isNotEmpty()) FolderPickerDialog(if (pick == "cwd") Prefs.cwd.value else Prefs.attachDir.value, { if (pick == "cwd") Prefs.cwd.value = it else Prefs.attachDir.value = it; pick = "" }, { pick = "" })
             }
-            Section(R.string.sec_keep) {
+            if (cat == "alive") Section(R.string.sec_keep) {
+                Button(onSetup, Modifier.fillMaxWidth()) { Text(tr("Setup wizard (Termux, Ubuntu, Claude)", "Kurulum sihirbazı (Termux, Ubuntu, Claude)")) }
                 if (Build.VERSION.SDK_INT >= 31) SwitchRow(R.string.dynamic_color, null, dyn) { Prefs.dynamic.value = it }
                 SwitchRow(R.string.screen_on, null, screenOn) { Prefs.screenOn.value = it }
                 SwitchRow(R.string.keep_service, null, keep) { Prefs.keepAlive.value = it; if (it) KeepAliveService.start(ctx) }

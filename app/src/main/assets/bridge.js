@@ -58,6 +58,15 @@ function makeTitle(user, reply) {
 const server = http.createServer(async (req, res) => {
   if (TOKEN && req.headers['x-token'] !== TOKEN) { res.writeHead(401); return res.end('unauthorized'); }
   if (req.method === 'GET' && req.url === '/ping') { res.writeHead(200); return res.end('pong'); }
+  if (req.method === 'GET' && req.url.startsWith('/ls')) {
+    const fs = require('fs'), path = require('path');
+    let p = '/root';
+    try { p = path.resolve(decodeURIComponent((req.url.split('?p=')[1] || '/root').split('&')[0]) || '/'); } catch (e) {}
+    let dirs = [];
+    try { dirs = fs.readdirSync(p, { withFileTypes: true }).filter((d) => { if (d.name.startsWith('.')) return false; try { return d.isDirectory() || fs.statSync(path.join(p, d.name)).isDirectory(); } catch (e) { return false; } }).map((d) => d.name).sort(); } catch (e) {}
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ path: p, parent: path.dirname(p), dirs }));
+  }
   if (req.method === 'POST' && req.url === '/title') {
     let b;
     try { b = await readBody(req); } catch (e) { res.writeHead(400); return res.end('bad json'); }

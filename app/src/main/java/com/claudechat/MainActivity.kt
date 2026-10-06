@@ -35,13 +35,14 @@ class MainActivity : ComponentActivity() {
                     enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
                 }
                 var screen by rememberSaveable { mutableStateOf("chat") }
-                BackHandler(screen != "chat") { screen = if (screen == "guide") "settings" else "chat" }
+                BackHandler(screen != "chat") { screen = if (screen == "guide" || screen == "setup") "settings" else "chat" }
                 Crossfade(screen, label = "screen") {
                     when (it) {
-                        "settings" -> SettingsScreen({ screen = "chat" }, { screen = "guide" }, { recreate() })
+                        "settings" -> SettingsScreen({ screen = "chat" }, { screen = "guide" }, { recreate() }, { screen = "setup" })
                         "guide" -> GuideScreen { screen = "settings" }
+                        "setup" -> SetupScreen { screen = "chat" }
                         "chats" -> ChatsScreen({ screen = "chat" }, { screen = "chat" })
-                        else -> ChatScreen({ screen = "settings" }, { screen = "chats" })
+                        else -> ChatScreen({ screen = "settings" }, { screen = "chats" }, { screen = "setup" })
                     }
                 }
             }
