@@ -71,6 +71,7 @@ object Prefs {
     lateinit var blackMascot: B
     lateinit var blackText: S    // free text widget
     lateinit var blackFont: S    // clock font: thin / regular / bold / mono / serif / cursive
+    lateinit var blackStyle: S   // digital / stacked / analog / ticks
     lateinit var blackSize: S    // clock size, sp
     lateinit var dynamic: B
     lateinit var keepAlive: B
@@ -102,8 +103,9 @@ object Prefs {
         blackBattery = B("blackBattery", true)
         blackMascot = B("blackMascot", false)
         blackText = S("blackText", "")
-        blackFont = S("blackFont", "thin")
+        blackFont = S("blackFont", "outfit")
         blackSize = S("blackSize", "72")
+        blackStyle = S("blackStyle", "digital")
         dynamic = B("dynamic", false)
         keepAlive = B("keepAlive", true)
         autoStart = B("autoStart", true)

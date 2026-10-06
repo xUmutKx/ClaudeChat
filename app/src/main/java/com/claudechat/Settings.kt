@@ -51,6 +51,11 @@ private fun Page(title: Int, onBack: () -> Unit, content: @Composable ColumnScop
 }
 
 @Composable
+private fun Sub(title: Int) {
+    Text(stringResource(title), Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+}
+
+@Composable
 private fun Section(title: Int, content: @Composable ColumnScope.() -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(title), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
@@ -129,7 +134,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
 
     var adv by remember { mutableStateOf(false) }
     Page(R.string.settings, onBack) {
-        Section(R.string.sec_bridge) {
+        Section(R.string.sec_method) {
             val up = bridge == 200
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(if (up) statusColor(Status.Done) else statusColor(Status.Error)))
@@ -146,6 +151,37 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
             }) { Text(stringResource(R.string.start_bridge)) }
             if (bridge == 401) Hint(stringResource(R.string.bridge_401))
             if (!up && Termux.log.isNotBlank()) Hint(Termux.log.trim().takeLast(400))
+
+            Sub(R.string.sec_termux)
+            run {
+            val inst = remember(tick) { Termux.installed(ctx) }
+            Hint(stringResource(if (inst) R.string.termux_installed else R.string.termux_not_installed))
+            Hint(stringResource(if (termuxPerm) R.string.termux_perm_granted else R.string.termux_perm_missing))
+            if (!termuxPerm) Button({ permLauncher.launch(Termux.PERM) }) { Text(stringResource(R.string.grant)) }
+            Button({
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { Termux.rootSetup() }
+                    android.widget.Toast.makeText(ctx, if (ok) R.string.root_setup_ok else R.string.root_setup_fail, android.widget.Toast.LENGTH_LONG).show()
+                }
+            }) { Text(stringResource(R.string.root_setup)) }
+            Hint(stringResource(R.string.termux_setup))
+            CodeLine(Termux.SETUP_CMD)
+        }
+
+            Sub(R.string.sec_manual)
+            run {
+            Hint(stringResource(R.string.manual_sub))
+            val cmd = remember(token) { Termux.manualCmd(ctx) }
+            CodeLine(cmd, cmd.take(90) + "…")
+            Button({ Termux.openTermux(ctx) }) { Text(stringResource(R.string.open_termux)) }
+            OutlinedButton({ scope.launch { bridge = -2; bridge = Engine.ping() } }) { Text(stringResource(R.string.test_conn)) }
+            }
+            Sub(R.string.sec_connection)
+            OutlinedTextField(Prefs.port.value, { Prefs.port.value = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.port)) }, singleLine = true)
+            OutlinedTextField(Prefs.distro.value, { Prefs.distro.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.distro)) }, singleLine = true)
+            OutlinedTextField(token, { token = it; Prefs.token.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.token)) }, singleLine = true,
+                trailingIcon = { TextButton({ token = Prefs.randomToken(); Prefs.token.value = token }) { Text(stringResource(R.string.regenerate)) } })
+            SwitchRow(R.string.auto_start, null, auto) { Prefs.autoStart.value = it }
         }
 
         Section(R.string.sec_usage) {
@@ -165,28 +201,6 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
             }
         }
 
-        Section(R.string.sec_termux) {
-            val inst = remember(tick) { Termux.installed(ctx) }
-            Hint(stringResource(if (inst) R.string.termux_installed else R.string.termux_not_installed))
-            Hint(stringResource(if (termuxPerm) R.string.termux_perm_granted else R.string.termux_perm_missing))
-            if (!termuxPerm) Button({ permLauncher.launch(Termux.PERM) }) { Text(stringResource(R.string.grant)) }
-            Button({
-                scope.launch {
-                    val ok = withContext(Dispatchers.IO) { Termux.rootSetup() }
-                    android.widget.Toast.makeText(ctx, if (ok) R.string.root_setup_ok else R.string.root_setup_fail, android.widget.Toast.LENGTH_LONG).show()
-                }
-            }) { Text(stringResource(R.string.root_setup)) }
-            Hint(stringResource(R.string.termux_setup))
-            CodeLine(Termux.SETUP_CMD)
-        }
-
-        Section(R.string.sec_manual) {
-            Hint(stringResource(R.string.manual_sub))
-            val cmd = remember(token) { Termux.manualCmd(ctx) }
-            CodeLine(cmd, cmd.take(90) + "…")
-            Button({ Termux.openTermux(ctx) }) { Text(stringResource(R.string.open_termux)) }
-            OutlinedButton({ scope.launch { bridge = -2; bridge = Engine.ping() } }) { Text(stringResource(R.string.test_conn)) }
-        }
 
         Section(R.string.sec_appearance) {
             Choices(listOf("system" to R.string.theme_system, "light" to R.string.theme_light, "dark" to R.string.theme_dark, "amoled" to R.string.theme_amoled), theme) { Prefs.theme.value = it }
@@ -219,7 +233,9 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
                 val font by Prefs.blackFont.flow.collectAsState()
                 val size by Prefs.blackSize.flow.collectAsState()
                 var sz by remember { mutableFloatStateOf((size.toFloatOrNull() ?: 72f).coerceIn(32f, 120f)) }
-                Choices(listOf("thin" to R.string.font_thin, "regular" to R.string.font_regular, "bold" to R.string.font_bold, "mono" to R.string.font_mono, "serif" to R.string.font_serif, "cursive" to R.string.font_cursive), font) { Prefs.blackFont.value = it }
+                val style by Prefs.blackStyle.flow.collectAsState()
+                Choices(listOf("digital" to R.string.cs_digital, "stacked" to R.string.cs_stacked, "analog" to R.string.cs_analog, "ticks" to R.string.cs_ticks), style) { Prefs.blackStyle.value = it }
+                Choices(listOf("outfit" to R.string.font_outfit, "orbitron" to R.string.font_orbitron, "grotesk" to R.string.font_grotesk, "audiowide" to R.string.font_audiowide, "rajdhani" to R.string.font_rajdhani, "chakra" to R.string.font_chakra, "exo2i" to R.string.font_exo2i, "bungee" to R.string.font_bungee, "sharetech" to R.string.font_sharetech, "majormono" to R.string.font_majormono, "michroma" to R.string.font_michroma, "regular" to R.string.font_regular, "mono" to R.string.font_mono), if (font == "thin") "outfit" else font) { Prefs.blackFont.value = it }
                 Text(stringResource(R.string.black_size, sz.toInt()), style = MaterialTheme.typography.bodyLarge)
                 Slider(sz, { sz = it }, valueRange = 32f..120f, onValueChangeFinished = { Prefs.blackSize.value = sz.toInt().toString() })
             }
@@ -238,13 +254,6 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
                 Choices(listOf("default" to R.string.mode_default, "acceptEdits" to R.string.mode_edits, "plan" to R.string.mode_plan, "bypassPermissions" to R.string.mode_bypass), mode) { Prefs.mode.value = it }
                 OutlinedTextField(Prefs.cwd.value, { Prefs.cwd.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.workdir)) }, singleLine = true)
                 OutlinedTextField(Prefs.attachDir.value, { Prefs.attachDir.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.attach_dir)) }, singleLine = true)
-            }
-            Section(R.string.sec_bridge) {
-                OutlinedTextField(Prefs.port.value, { Prefs.port.value = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.port)) }, singleLine = true)
-                OutlinedTextField(Prefs.distro.value, { Prefs.distro.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.distro)) }, singleLine = true)
-                OutlinedTextField(token, { token = it; Prefs.token.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.token)) }, singleLine = true,
-                    trailingIcon = { TextButton({ token = Prefs.randomToken(); Prefs.token.value = token }) { Text(stringResource(R.string.regenerate)) } })
-                SwitchRow(R.string.auto_start, null, auto) { Prefs.autoStart.value = it }
             }
             Section(R.string.sec_keep) {
                 if (Build.VERSION.SDK_INT >= 31) SwitchRow(R.string.dynamic_color, null, dyn) { Prefs.dynamic.value = it }

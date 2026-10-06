@@ -205,4 +205,21 @@
     <string name="black_battery">Battery</string>
     <string name="black_mascot">Mascot</string>
     <string name="black_text">Custom text</string>
+    <string name="font_outfit">Outfit</string>
+    <string name="font_orbitron">Orbitron</string>
+    <string name="font_grotesk">Space Grotesk</string>
+    <string name="sec_method">Usage method</string>
+    <string name="sec_connection">Connection</string>
+    <string name="cs_digital">Digital</string>
+    <string name="cs_stacked">Stacked</string>
+    <string name="cs_analog">Analog</string>
+    <string name="cs_ticks">Analog (minimal)</string>
+    <string name="font_audiowide">Audiowide (techno)</string>
+    <string name="font_rajdhani">Rajdhani (squared)</string>
+    <string name="font_chakra">Chakra Petch (italic)</string>
+    <string name="font_exo2i">Exo 2 (italic)</string>
+    <string name="font_bungee">Bungee (blocky)</string>
+    <string name="font_sharetech">Share Tech Mono</string>
+    <string name="font_majormono">Major Mono</string>
+    <string name="font_michroma">Michroma (wide)</string>
 </resources>

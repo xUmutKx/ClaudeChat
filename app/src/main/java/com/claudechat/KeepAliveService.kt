@@ -75,7 +75,7 @@ class KeepAliveService : Service() {
                 Prefs.blackDim.flow.map { }, Prefs.blackText.flow.map { },
                 Prefs.blackClock.flow.map { }, Prefs.blackDate.flow.map { }, Prefs.blackStatus.flow.map { },
                 Prefs.blackLast.flow.map { }, Prefs.blackBattery.flow.map { }, Prefs.blackMascot.flow.map { },
-                Prefs.blackFont.flow.map { }, Prefs.blackSize.flow.map { },
+                Prefs.blackFont.flow.map { }, Prefs.blackStyle.flow.map { }, Prefs.blackSize.flow.map { },
             ).collect { overlay.refreshBlack() }
         }
     }

@@ -190,17 +190,24 @@ class Overlay(base: Context) {
         }
         fun add(w: View, top: Int = 0) = v.addView(w, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(top) })
         if (Prefs.blackMascot.value) v.addView(ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot) }, LinearLayout.LayoutParams(dp(56), dp(40)).apply { bottomMargin = dp(12) })
-        if (Prefs.blackClock.value) add(android.widget.TextClock(ctx).apply {
-            format12Hour = "h:mm"; format24Hour = "HH:mm"; textSize = (Prefs.blackSize.value.toFloatOrNull() ?: 72f).coerceIn(32f, 120f); setTextColor(0xFFD0D0D0.toInt()); gravity = Gravity.CENTER
-            typeface = when (Prefs.blackFont.value) {
-                "regular" -> android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
-                "bold" -> android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD)
-                "mono" -> android.graphics.Typeface.MONOSPACE
-                "serif" -> android.graphics.Typeface.SERIF
-                "cursive" -> android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL)
-                else -> android.graphics.Typeface.create("sans-serif-thin", android.graphics.Typeface.NORMAL)
+        if (Prefs.blackClock.value) {
+            val face = clockFont(ctx, Prefs.blackFont.value)
+            val size = (Prefs.blackSize.value.toFloatOrNull() ?: 72f).coerceIn(32f, 120f)
+            val accent = 0xFFD97757.toInt()
+            fun clock(fmt12: String, fmt24: String, color: Int, sp: Float) = android.widget.TextClock(ctx).apply {
+                format12Hour = fmt12; format24Hour = fmt24; textSize = sp; setTextColor(color); gravity = Gravity.CENTER; typeface = face
+                includeFontPadding = false
             }
-        })
+            when (Prefs.blackStyle.value) {
+                "stacked" -> { // Samsung-style: hours over minutes
+                    add(clock("h", "HH", 0xFFE8E8E8.toInt(), size * 1.25f))
+                    add(clock("mm", "mm", accent, size * 1.25f), 2)
+                }
+                "analog", "ticks" -> v.addView(ClockView(ctx, Prefs.blackStyle.value == "analog", face, accent),
+                    LinearLayout.LayoutParams(dp((size * 2.6f).toInt()), dp((size * 2.6f).toInt())))
+                else -> add(clock("h:mm", "HH:mm", 0xFFD0D0D0.toInt(), size))
+            }
+        }
         if (Prefs.blackDate.value) add(android.widget.TextClock(ctx).apply {
             format12Hour = "EEEE, d MMMM"; format24Hour = "EEEE, d MMMM"; textSize = 16f; setTextColor(dim); gravity = Gravity.CENTER
         })
@@ -345,4 +352,27 @@ class Overlay(base: Context) {
         mascot = null; spinner = null; mark = null; label = null; sub = null; bar = null; pulse = null; bob = null; eyes = null; ring = null
         lastStatus = null
     }
+}
+
+/** Bundled fonts (SIL OFL) for the always-on clock; variable ones get a weight. */
+private fun clockFont(ctx: Context, key: String): android.graphics.Typeface {
+    fun asset(file: String, wght: Int? = null) = runCatching {
+        android.graphics.Typeface.Builder(ctx.assets, "fonts/$file.ttf").apply { if (wght != null) setFontVariationSettings("'wght' $wght") }.build()
+    }.getOrNull()
+    return when (key) {
+        "orbitron" -> asset("orbitron", 500)
+        "grotesk" -> asset("grotesk", 300)
+        "audiowide" -> asset("audiowide")
+        "rajdhani" -> asset("rajdhani")
+        "chakra" -> asset("chakra")
+        "exo2i" -> asset("exo2i", 300)
+        "bungee" -> asset("bungee")
+        "sharetech" -> asset("sharetech")
+        "majormono" -> asset("majormono")
+        "michroma" -> asset("michroma")
+        "regular" -> android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
+        "bold" -> android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD)
+        "mono" -> android.graphics.Typeface.MONOSPACE
+        else -> asset("outfit", 200) // default: "outfit" (older saved value "thin" lands here too)
+    } ?: android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
 }

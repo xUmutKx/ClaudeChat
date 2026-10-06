@@ -183,7 +183,7 @@ private fun Message(m: Msg, lastInGroup: Boolean, onSettings: () -> Unit) {
                 val body: @Composable () -> Unit = {
                     if (err) Icon(Icons.Filled.WarningAmber, null, Modifier.size(18.dp), tint = fg)
                     SelectionContainer { MarkdownText(m.text, fg, serif = !err) }
-                    if (m.action) TextButton(onSettings, contentPadding = PaddingValues(0.dp)) { Text(stringResource(R.string.settings)) }
+                    if (m.action) TextButton(onSettings, contentPadding = PaddingValues(0.dp)) { Text(stringResource(R.string.sec_method)) }
                 }
                 if (err) Surface(shape = RoundedCornerShape(16.dp), color = cs.errorContainer) { Column(Modifier.padding(14.dp)) { body() } }
                 else Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { body() }

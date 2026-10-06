@@ -205,4 +205,21 @@
     <string name="black_battery">Pil</string>
     <string name="black_mascot">Maskot</string>
     <string name="black_text">Özel yazı</string>
+    <string name="font_outfit">Outfit</string>
+    <string name="font_orbitron">Orbitron</string>
+    <string name="font_grotesk">Space Grotesk</string>
+    <string name="sec_method">Kullanım yöntemi</string>
+    <string name="sec_connection">Bağlantı</string>
+    <string name="cs_digital">Dijital</string>
+    <string name="cs_stacked">İstifli</string>
+    <string name="cs_analog">Analog</string>
+    <string name="cs_ticks">Analog (sade)</string>
+    <string name="font_audiowide">Audiowide (teknolojik)</string>
+    <string name="font_rajdhani">Rajdhani (köşeli)</string>
+    <string name="font_chakra">Chakra Petch (italik)</string>
+    <string name="font_exo2i">Exo 2 (italik)</string>
+    <string name="font_bungee">Bungee (blok)</string>
+    <string name="font_sharetech">Share Tech Mono</string>
+    <string name="font_majormono">Major Mono</string>
+    <string name="font_michroma">Michroma (geniş)</string>
 </resources>
