@@ -116,12 +116,28 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
     val pill by Prefs.pillColor.flow.collectAsState()
     val bg by Prefs.chatBg.flow.collectAsState()
     val bubble by Prefs.bubbleStyle.flow.collectAsState()
+    val skin by Prefs.mascotSkin.flow.collectAsState()
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(tr("Customize", "Özelleştir"), fontFamily = FontFamily.Serif, fontSize = 24.sp)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { Mascot(true, Modifier.size(84.dp, 64.dp)) }
+            // every state side by side, so the blue "shell is running" look can be checked without waiting for one
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
+                StatePreview(tr("Idle", "Boşta")) { Mascot(false, Modifier.size(64.dp, 46.dp), sleeping = true) }
+                StatePreview(tr("Working", "Çalışıyor")) { Mascot(true, Modifier.size(64.dp, 46.dp)) }
+                StatePreview(tr("Shell", "Komut")) { Mascot(true, Modifier.size(72.dp, 44.dp), computer = true) }
+            }
+            Button({ Engine.previewShell(); onDismiss() }, Modifier.fillMaxWidth()) { Text(tr("Show the blue shell state for 10 s", "Mavi komut durumunu 10 sn göster")) }
             Label(tr("Outfit", "Kıyafet"))
-            Chips(listOf("none" to tr("None", "Yok"), "wizard" to tr("Wizard", "Büyücü"), "crown" to tr("Crown", "Taç"), "party" to tr("Party", "Parti"), "bow" to tr("Bow", "Fiyonk")), outfit) { Prefs.pillOutfit.value = it }
+            Chips(listOf("none" to tr("None", "Yok"), "wizard" to tr("Wizard", "Büyücü"), "crown" to tr("Crown", "Taç"), "party" to tr("Party", "Parti"), "bow" to tr("Bow", "Fiyonk"),
+                "cap" to tr("Cap", "Şapka"), "phones" to tr("Headphones", "Kulaklık"), "halo" to tr("Halo", "Hale"), "ears" to tr("Cat ears", "Kedi kulağı"), "shades" to tr("Shades", "Gözlük"), "santa" to tr("Santa hat", "Noel şapkası")), outfit) { Prefs.pillOutfit.value = it }
+            Label(tr("Body colour", "Gövde rengi"))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Outfit.SKINS.forEach { k ->
+                    Box(Modifier.size(34.dp).clip(CircleShape).background(Color(Outfit.SKIN_SWATCH[k] ?: 0xFFD97757))
+                        .then(if (skin == k) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+                        .clickable { Prefs.mascotSkin.value = k })
+                }
+            }
             Label(tr("Animation", "Animasyon"))
             Chips(listOf("steps" to tr("Frame by frame", "Kare kare"), "smooth" to tr("Smooth", "Akıcı")), dance) { Prefs.danceMode.value = it }
             Label(tr("Pill colour", "Pill rengi"))
@@ -131,6 +147,14 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
             Label(tr("Message bubbles", "Mesaj balonları"))
             Chips(listOf("soft" to tr("Soft", "Yumuşak"), "round" to tr("Round", "Yuvarlak"), "square" to tr("Square", "Köşeli"), "outline" to tr("Outline", "Çerçeve")), bubble) { Prefs.bubbleStyle.value = it }
         }
+    }
+}
+
+@Composable
+private fun StatePreview(label: String, content: @Composable () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(78.dp, 62.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) { content() }
+        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
     }
 }
 

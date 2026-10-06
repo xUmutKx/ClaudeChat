@@ -83,7 +83,9 @@ class KeepAliveService : Service() {
             kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { })
                 .drop(4).collect { overlay.onRotate(); startFg(fgText, fgWorking ?: false) }
         }
-        scope.launch { AppState.foreground.collect { overlay.setQuiet(it) } } // chat open: its header mascot shows the status, so the pill hides
+        scope.launch { Engine.demoShell.collect { overlay.redraw() } }
+        scope.launch { Prefs.mascotSkin.flow.collect { overlay.redraw() } }
+        scope.launch { combine(AppState.foreground, Engine.demoShell) { fg, demo -> fg && !demo }.collect { overlay.setQuiet(it) } } // the shell preview also shows on the pill // chat open: its header mascot shows the status, so the pill hides
     }
 
     private data class Snap(val st: Status, val det: String, val last: String, val style: String, val keep: Boolean)

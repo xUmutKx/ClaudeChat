@@ -89,6 +89,10 @@ object Engine {
     val agents: StateFlow<List<AgentInfo>> = current(emptyList()) { it.agents }
     val shell: StateFlow<Boolean> = current(false) { it.shell }
 
+    /** "Show me the blue shell state": the header, pill and bubble pretend a command runs for a few seconds (customize sheet preview). */
+    val demoShell = MutableStateFlow(false)
+    fun previewShell() { demoShell.value = true; uiScope.launch { delay(10_000); demoShell.value = false } }
+
     private fun msgFile(id: String) = File(dir, "$id.json")
 
     private fun readMsgs(id: String): List<Msg> = try {

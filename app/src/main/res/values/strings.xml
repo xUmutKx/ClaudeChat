@@ -240,4 +240,10 @@
     <string name="font_majormono">Major Mono</string>
     <string name="font_michroma">Michroma (wide)</string>
     <string name="ov_style_bubble">Floating bubble</string>
+    <string name="po_cap">Cap</string>
+    <string name="po_phones">Headphones</string>
+    <string name="po_halo">Halo</string>
+    <string name="po_ears">Cat ears</string>
+    <string name="po_shades">Shades</string>
+    <string name="po_santa">Santa hat</string>
 </resources>

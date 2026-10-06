@@ -1,10 +1,12 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="20dp" android:height="18dp" android:viewportWidth="20" android:viewportHeight="18">
-    <path android:fillColor="#FFD97757" android:pathData="M3,6H17V13H3Z M1,8H3V11H1Z M17,8H19V11H17Z" />
-    <path android:fillColor="#774FC3F7" android:pathData="M3,6H17V12H3Z" />
-    <path android:fillColor="#FFE3F6FF" android:pathData="M6,8H8V10H6Z M12,8H14V10H12Z" />
-    <path android:fillColor="#FF30343B" android:pathData="M4,12H16V16H4Z" />
-    <path android:fillColor="#FF5A6068" android:pathData="M4,12H16V13H4Z" />
-    <path android:fillColor="#FF8FD8FF" android:pathData="M9,13.5H11V15H9Z" />
-    <path android:fillColor="#FF9AA0A6" android:pathData="M3,16H17V17H3Z" />
+    android:width="30dp" android:height="18dp" android:viewportWidth="30" android:viewportHeight="18">
+    <!-- the mascot (same pixels as ic_mascot18, so hats line up on the left 20 columns) -->
+    <path android:fillColor="#FFD97757" android:pathData="M3,6H17V13H3Z M1,8H3V11H1Z M17,8H19V11H17Z M4,13H6V16H4Z M7,13H9V16H7Z M11,13H13V16H11Z M14,13H16V16H14Z" />
+    <path android:fillColor="#FF1F1B18" android:pathData="M6,8H8V10H6Z M12,8H14V10H12Z" />
+    <!-- laptop beside it, seen from the back: aluminium lid, small white apple-like logo, base -->
+    <path android:fillColor="#FFB8BEC6" android:pathData="M21,7H29V14H21Z" />
+    <path android:fillColor="#FF8A9099" android:pathData="M21,13H29V14H21Z" />
+    <path android:fillColor="#FFDADFE5" android:pathData="M20,14H30V15H20Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M25,8H26V9H25Z M23,9H25V10H23Z M26,9H27V10H26Z M23,10H27V11H23Z M23,11H27V12H23Z M24,12H26V13H24Z" />
+    <path android:fillColor="#FFB8BEC6" android:pathData="M26,10H27V11H26Z" />
 </vector>

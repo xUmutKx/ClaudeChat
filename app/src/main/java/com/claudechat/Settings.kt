@@ -266,7 +266,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 Text(stringResource(R.string.pill_gap, gap.toInt()), style = MaterialTheme.typography.bodyLarge)
                 Slider(gap, { gap = it }, valueRange = 0f..8f, steps = 7, onValueChangeFinished = { Prefs.pillGap.value = gap.toInt().toString() })
                 Text(stringResource(R.string.pill_outfit), style = MaterialTheme.typography.bodyLarge)
-                Choices(listOf("none" to R.string.po_none, "wizard" to R.string.po_wizard, "crown" to R.string.po_crown, "party" to R.string.po_party, "bow" to R.string.po_bow), pOutfit) { Prefs.pillOutfit.value = it }
+                Choices(listOf("none" to R.string.po_none, "wizard" to R.string.po_wizard, "crown" to R.string.po_crown, "party" to R.string.po_party, "bow" to R.string.po_bow, "cap" to R.string.po_cap, "phones" to R.string.po_phones, "halo" to R.string.po_halo, "ears" to R.string.po_ears, "shades" to R.string.po_shades, "santa" to R.string.po_santa), pOutfit) { Prefs.pillOutfit.value = it }
             }
             if (!canOverlay && overlay != "off") {
                 Hint(stringResource(R.string.overlay_perm_sub))

@@ -240,4 +240,10 @@
     <string name="font_majormono">Major Mono</string>
     <string name="font_michroma">Michroma (geniş)</string>
     <string name="ov_style_bubble">Yüzen balon</string>
+    <string name="po_cap">Şapka</string>
+    <string name="po_phones">Kulaklık</string>
+    <string name="po_halo">Hale</string>
+    <string name="po_ears">Kedi kulağı</string>
+    <string name="po_shades">Gözlük</string>
+    <string name="po_santa">Noel şapkası</string>
 </resources>

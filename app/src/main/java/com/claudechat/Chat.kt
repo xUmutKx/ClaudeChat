@@ -92,7 +92,9 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit 
     val title = chats.firstOrNull { it.id == curId }?.title.orEmpty()
     var sheet by remember { mutableStateOf(false) }
     var custom by remember { mutableStateOf(false) }
-    val shell by Engine.shell.collectAsState()
+    val realShell by Engine.shell.collectAsState()
+    val demoShell by Engine.demoShell.collectAsState()
+    val shell = realShell || demoShell
     val items = remember(msgs) { groupMsgs(msgs) }
     val working = st == Status.Working
     val slash = if (input.startsWith("/") && !input.contains(' ')) Cmds.matching(input.drop(1)) else emptyList()
@@ -140,7 +142,8 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(52.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest).clickable(onClick = onMascot), contentAlignment = Alignment.Center) {
-                Mascot(st.running, Modifier.size(36.dp, 26.dp), sleeping = st == Status.Idle, computer = st == Status.Background || shell)
+                val pc = st == Status.Background || shell
+                Mascot(st.running, Modifier.size(if (pc) 46.dp else 36.dp, if (pc) 28.dp else 26.dp), sleeping = st == Status.Idle, computer = pc)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(onClick = onModel)) {
@@ -171,16 +174,20 @@ object Dance {
 @Composable
 private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean = false) {
     val hat = Outfit.hat(Prefs.pillOutfit.flow.collectAsState().value)
-    if (computer) { // a shell runs in the background: at the laptop, face lit blue
-        Box(modifier) {
-            Image(painterResource(R.drawable.ic_mascot_pc), null, Modifier.fillMaxSize())
-            if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxSize())
+    val skin = Prefs.mascotSkin.flow.collectAsState().value
+    val tint = remember(skin) { Outfit.skinMatrix(skin)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
+    if (computer) { // a shell runs: the laptop (with its apple-like logo) stands beside the mascot
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Box(Modifier.aspectRatio(30f / 18f)) {
+                Image(painterResource(R.drawable.ic_mascot_pc), null, Modifier.fillMaxSize(), colorFilter = tint)
+                if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxHeight().aspectRatio(20f / 18f).align(Alignment.CenterStart))
+            }
         }
         return
     }
-    if (hat == 0) { Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot), null, modifier); return }
+    if (hat == 0) { Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot), null, modifier, colorFilter = tint); return }
     Box(modifier) {
-        Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), null, Modifier.fillMaxSize())
+        Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), null, Modifier.fillMaxSize(), colorFilter = tint)
         Image(painterResource(hat), null, Modifier.fillMaxSize())
     }
 }

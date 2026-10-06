@@ -82,11 +82,19 @@ class Overlay(base: Context) {
             "bow" -> R.drawable.ic_hat_bow
             else -> 0
         }
-        fun d(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate()
-        if (computer) return if (hat == 0) d(R.drawable.ic_mascot_pc) else android.graphics.drawable.LayerDrawable(arrayOf(d(R.drawable.ic_mascot_pc), d(hat)))
+        val skin = Outfit.skinMatrix()
+        fun d(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate().also { if (skin != null) it.colorFilter = android.graphics.ColorMatrixColorFilter(skin) }
+        fun h(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate()
+        if (computer) {
+            if (hat == 0) return d(R.drawable.ic_mascot_pc)
+            // the picture is 30 columns wide (mascot + laptop); the hat covers only the mascot's 20 on the left
+            return android.graphics.drawable.LayerDrawable(arrayOf(d(R.drawable.ic_mascot_pc), h(hat))).also {
+                it.setLayerGravity(1, android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL)
+            }
+        }
         if (hat == 0) return d(if (sleep) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot)
         // outfit drawables share a taller 20x18 canvas so the hat fits above the head
-        return android.graphics.drawable.LayerDrawable(arrayOf(d(if (sleep) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), d(hat)))
+        return android.graphics.drawable.LayerDrawable(arrayOf(d(if (sleep) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), h(hat)))
     }
 
     private fun color(st: Status) = when (st) {
@@ -120,7 +128,7 @@ class Overlay(base: Context) {
         lastStyleIn = styleIn; cache = Triple(st, det, last)
         if (style == "off" || !Settings.canDrawOverlays(ctx)) { hide(); return }
         if (style != this.style || root == null || black != (blackLayer != null)) { hide(); if (black) showBlack(); show(style) }
-        val shell = st == Status.Working && Engine.shell.value
+        val shell = (st == Status.Working && Engine.shell.value) || Engine.demoShell.value
         val c = if (shell) 0xFF2196F3.toInt() else color(st)
         val working = st.running
         spinner?.visibility = if (working && style != "pill") View.VISIBLE else View.GONE
@@ -171,6 +179,9 @@ class Overlay(base: Context) {
         }
         applyQuiet()
     }
+
+    /** Re-draw with the last known state (look settings or the shell preview changed). */
+    fun redraw() { if (root != null) render(lastStyleIn, cache.first, cache.second, cache.third) }
 
     /** While the chat is open the pill/curtain are hidden but stay attached (the window itself keeps Termux alive). */
     private var quiet = false
