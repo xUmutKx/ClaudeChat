@@ -41,6 +41,8 @@ class Overlay(base: Context) {
     private var pulse: ObjectAnimator? = null
     private var bob: ObjectAnimator? = null
     private var eyes: ObjectAnimator? = null
+    private var bMascot: ImageView? = null
+    private var bBob: ObjectAnimator? = null
     private var ring: RingView? = null
     private var lastStatus: Status? = null
     private var blackLayer: View? = null
@@ -53,8 +55,39 @@ class Overlay(base: Context) {
 
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
 
+    /** The mascot's dance while Claude works: steps through Dance.ROT / Dance.UP at Dance.FRAME_MS per frame, like the notification. */
+    private fun dancer(v: View, hop: Float): ObjectAnimator {
+        val n = Dance.ROT.size
+        fun kf(f: (Int) -> Float) = Array(n + 1) { i -> android.animation.Keyframe.ofFloat(i / n.toFloat(), f(i % n)) }
+        return ObjectAnimator.ofPropertyValuesHolder(v,
+            android.animation.PropertyValuesHolder.ofKeyframe(View.ROTATION, *kf { Dance.ROT[it] }),
+            android.animation.PropertyValuesHolder.ofKeyframe(View.TRANSLATION_Y, *kf { -Dance.UP[it] * hop }),
+        ).apply {
+            duration = Dance.FRAME_MS * n; repeatCount = ValueAnimator.INFINITE
+            // frame by frame: snap time to whole frames; smooth: let it glide between them
+            interpolator = if (Prefs.danceMode.value == "smooth") android.view.animation.LinearInterpolator()
+                           else android.animation.TimeInterpolator { t -> kotlin.math.floor(t * n) / n }
+        }
+    }
+
+    /** The mascot picture: awake or asleep (closed eyes), with the chosen outfit on its head. */
+    private fun mascotDrawable(sleep: Boolean): android.graphics.drawable.Drawable {
+        val hat = when (Prefs.pillOutfit.value) {
+            "wizard" -> R.drawable.ic_hat_wizard
+            "crown" -> R.drawable.ic_hat_crown
+            "party" -> R.drawable.ic_hat_party
+            "bow" -> R.drawable.ic_hat_bow
+            else -> 0
+        }
+        fun d(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate()
+        if (hat == 0) return d(if (sleep) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot)
+        // outfit drawables share a taller 20x18 canvas so the hat fits above the head
+        return android.graphics.drawable.LayerDrawable(arrayOf(d(if (sleep) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), d(hat)))
+    }
+
     private fun color(st: Status) = when (st) {
         Status.Working -> 0xFFFF9800.toInt()
+        Status.Background -> 0xFF2196F3.toInt()
         Status.Done -> 0xFF4CAF50.toInt()
         Status.Error -> 0xFFF44336.toInt()
         Status.Offline -> 0xFF9E9E9E.toInt()
@@ -62,7 +95,7 @@ class Overlay(base: Context) {
     }
 
     private fun text(st: Status, det: String) = when (st) {
-        Status.Working -> if (det.isEmpty()) ctx.localized().getString(R.string.ov_working) else "Claude · $det"
+        Status.Working, Status.Background -> if (det.isEmpty()) ctx.localized().getString(R.string.ov_working) else "Claude · $det"
         Status.Done -> ctx.localized().getString(R.string.ov_done)
         Status.Error -> ctx.localized().getString(R.string.ov_error)
         Status.Offline -> ctx.localized().getString(R.string.ov_offline)
@@ -73,6 +106,7 @@ class Overlay(base: Context) {
         Status.Done -> "✓"
         Status.Error -> "✕"
         Status.Offline -> "!"
+        Status.Idle -> "z" // asleep
         else -> "•"
     }
 
@@ -83,18 +117,21 @@ class Overlay(base: Context) {
         if (style == "off" || !Settings.canDrawOverlays(ctx)) { hide(); return }
         if (style != this.style || root == null || black != (blackLayer != null)) { hide(); if (black) showBlack(); show(style) }
         val c = color(st)
-        val working = st == Status.Working
+        val working = st.running
         spinner?.visibility = if (working && style != "pill") View.VISIBLE else View.GONE
         spinner?.indeterminateTintList = ColorStateList.valueOf(c)
         ring?.set(c, working, st != Status.Idle)
         mark?.visibility = if (working) View.GONE else View.VISIBLE
         mark?.text = markOf(st); mark?.setTextColor(c)
+        mascot?.setImageDrawable(mascotDrawable(st == Status.Idle)) // idle: eyes closed + "z"
         label?.text = text(st, det)
         if (style == "pill") {
-            // idle: nothing visible (the window stays so the process keeps its priority); done fades away after a moment
-            root?.visibility = if (st == Status.Idle) View.INVISIBLE else View.VISIBLE
-            if (st == Status.Done) root?.let { r -> r.postDelayed({ if (lastStatus == Status.Done) r.visibility = View.INVISIBLE }, 3500) }
-            val show = st != Status.Idle
+            // idle: the mascot sleeps in the pill (eyes closed, "z"); done turns into sleep after a moment
+            root?.visibility = View.VISIBLE
+            if (st == Status.Done) root?.let { r -> r.postDelayed({
+                if (lastStatus == Status.Done) { mascot?.setImageDrawable(mascotDrawable(true)); mark?.text = markOf(Status.Idle); mark?.setTextColor(color(Status.Idle)) }
+            }, 3500) }
+            val show = true
             val sides = listOfNotNull(mascot, spinner?.parent as? View)
             sides.forEach { v ->
                 if (show && v.visibility != View.VISIBLE) { v.visibility = View.VISIBLE; v.scaleX = 0f; v.scaleY = 0f; v.animate().scaleX(1f).scaleY(1f).setDuration(700).setInterpolator(android.view.animation.DecelerateInterpolator()).start() }
@@ -108,12 +145,12 @@ class Overlay(base: Context) {
         (root as? LinearLayout)?.let { r ->
             if (working) r.animate().alpha(0.9f).setDuration(1800).withEndAction { r.animate().alpha(1f).setDuration(1800).start() }.start() else { r.animate().cancel(); r.alpha = 1f }
         }
-        bob?.let { if (working) { if (!it.isRunning) it.start() } else { it.cancel(); mascot?.translationY = 0f } }
+        bob?.let { if (working) { if (!it.isRunning) it.start() } else { it.cancel(); mascot?.translationY = 0f; mascot?.rotation = 0f } }
         if (blackLayer != null) updateBlack(st, det, last)
         // Eyes animation on status change (start/done)
         if (st != lastStatus) {
             lastStatus = st
-            if (st == Status.Working || st == Status.Done) mascot?.let { playEyesAnimation(it) }
+            if (st.running || st == Status.Done) mascot?.let { playEyesAnimation(it) }
         }
     }
 
@@ -147,7 +184,7 @@ class Overlay(base: Context) {
             val d = resources.displayMetrics.density
             if (!shown) return
             p.strokeWidth = 1.2f * d
-            val r = minOf(width, height) / 2f - p.strokeWidth
+            val r = minOf(width, height) / 2f - p.strokeWidth - 1f // 1px off the radius = 2px smaller diameter
             val box = RectF(width / 2f - r, height / 2f - r, width / 2f + r, height / 2f + r)
             if (working) c.drawArc(box, spin, 90f, false, p) else c.drawArc(box, 0f, 360f, false, p)
         }
@@ -166,14 +203,36 @@ class Overlay(base: Context) {
     private fun screenWidth(): Int =
         if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics.bounds.width() else ctx.resources.displayMetrics.widthPixels
 
-    /** The camera hole at the top edge; a centred stand-in when the device has no cutout. */
-    private fun cameraRect(): android.graphics.Rect {
+    private fun screenHeight(): Int =
+        if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics.bounds.height() else ctx.resources.displayMetrics.heightPixels
+
+    private enum class Edge { TOP, LEFT, RIGHT, BOTTOM }
+
+    /**
+     * The camera hole in the current rotation and the screen edge it sits on (top in portrait, a side edge in
+     * landscape); a centred stand-in at the top when the device has no cutout.
+     */
+    private fun cameraSpot(): Pair<Edge, android.graphics.Rect> {
+        val w = screenWidth(); val h = screenHeight()
         if (Build.VERSION.SDK_INT >= 30) {
-            val r = wm.currentWindowMetrics.windowInsets.displayCutout?.boundingRects?.filter { it.top <= statusBarHeight() && it.width() < screenWidth() / 2 }?.minByOrNull { it.top }
-            if (r != null) return android.graphics.Rect(r)
+            val r = wm.currentWindowMetrics.windowInsets.displayCutout?.boundingRects
+                ?.filter { it.width() < w / 2 && it.height() < h / 2 }
+                ?.minByOrNull { it.width() * it.height() }
+            if (r != null) {
+                // nearest edge wins; on a tie top, then left, then right, then bottom
+                val d = listOf(Edge.TOP to r.top, Edge.LEFT to r.left, Edge.RIGHT to w - r.right, Edge.BOTTOM to h - r.bottom)
+                return d.minByOrNull { it.second }!!.first to android.graphics.Rect(r)
+            }
         }
-        val w = screenWidth()
-        return android.graphics.Rect(w / 2 - dp(14), dp(8), w / 2 + dp(14), dp(8) + dp(28))
+        return Edge.TOP to android.graphics.Rect(w / 2 - dp(14), dp(8), w / 2 + dp(14), dp(8) + dp(28))
+    }
+
+    /** The screen was rotated (or folded): put the pill back around the camera. */
+    fun onRotate() {
+        if (root == null) return
+        val s = lastStyleIn
+        hide()
+        render(s, cache.first, cache.second, cache.third)
     }
 
     /** Full-screen AMOLED black under the island; keeps the screen on, double-tap leaves. */
@@ -189,7 +248,11 @@ class Overlay(base: Context) {
             if (mono) typeface = android.graphics.Typeface.MONOSPACE
         }
         fun add(w: View, top: Int = 0) = v.addView(w, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(top) })
-        if (Prefs.blackMascot.value) v.addView(ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot) }, LinearLayout.LayoutParams(dp(56), dp(40)).apply { bottomMargin = dp(12) })
+        if (Prefs.blackMascot.value) {
+            val m = ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot) }
+            bMascot = m; bBob = dancer(m, dp(6).toFloat())
+            v.addView(m, LinearLayout.LayoutParams(dp(56), dp(40)).apply { bottomMargin = dp(12) })
+        }
         if (Prefs.blackClock.value) {
             val face = clockFont(ctx, Prefs.blackFont.value)
             val size = (Prefs.blackSize.value.toFloatOrNull() ?: 72f).coerceIn(32f, 120f)
@@ -249,6 +312,7 @@ class Overlay(base: Context) {
         bDet?.text = det
         bLast?.text = last.trim().takeLast(240)
         bBatt?.text = battText()
+        bBob?.let { if (st.running) { if (!it.isRunning) it.start() } else { it.cancel(); bMascot?.translationY = 0f; bMascot?.rotation = 0f } }
     }
 
     /** Black-mode settings changed: rebuild the layers (black first, island on top). */
@@ -272,30 +336,33 @@ class Overlay(base: Context) {
                     base or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, Gravity.TOP))
             }
             "pill" -> { // long thin pill around the camera: dancing mascot left, loading / tick / cross right
-                val cut = cameraRect()
-                val hole = cut.height().coerceAtLeast(dp(18))
-                val rim = dp(1) // equal black rim above and below the camera
-                val h = hole + 2 * rim
+                val (edge, cut) = cameraSpot()
+                val vertical = edge == Edge.LEFT || edge == Edge.RIGHT // camera on a side edge (landscape): stand the pill up
+                val rim = dp(Prefs.pillGap.value.toIntOrNull()?.coerceIn(0, 8) ?: 1) // equal rim on both sides of the camera: more room = the ring floats further out
+                val hole = (if (vertical) cut.width() else cut.height()).coerceAtLeast(dp(18))
+                val thick = hole + 2 * rim // pill thickness across the edge
+                val ringLen = (if (vertical) cut.height() else cut.width()) + 2 * rim + dp(6)
                 val side = dp(40)
                 val box = LinearLayout(ctx).apply {
-                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-                    background = GradientDrawable().apply { cornerRadius = h / 2f; setColor(Color.BLACK) }
+                    orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                    background = GradientDrawable().apply { cornerRadius = thick / 2f; setColor(if (Prefs.pillColor.value == "white") Color.WHITE else Color.BLACK) }
                 }
-                val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                fun lp(len: Int) = if (vertical) LinearLayout.LayoutParams(thick, len) else LinearLayout.LayoutParams(len, thick)
                 mascot = ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot); setPadding(dp(8), dp(3), dp(4), dp(3)) }
-                row.addView(mascot, LinearLayout.LayoutParams(side, h))
+                box.addView(mascot, lp(side))
                 ring = RingView(ctx) // thin ring around the camera hole (spinner while working)
-                row.addView(ring, LinearLayout.LayoutParams(cut.width() + dp(8), h))
+                box.addView(ring, lp(ringLen))
                 val icon = FrameLayout(ctx)
                 spinner = ProgressBar(ctx).apply { isIndeterminate = true }
                 mark = TextView(ctx).apply { textSize = 15f; gravity = Gravity.CENTER; setTypeface(typeface, android.graphics.Typeface.BOLD) }
                 icon.addView(spinner, FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
                 icon.addView(mark, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
-                row.addView(icon, LinearLayout.LayoutParams(side, h))
-                box.addView(row, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (cut.top - rim).coerceAtLeast(0) })
-                label = TextView(ctx) // off-screen: the pill is a single row
-                bob = ObjectAnimator.ofFloat(mascot, "translationY", dp(1).toFloat() / 3, -dp(1).toFloat() / 3).apply { duration = 2600; interpolator = android.view.animation.AccelerateDecelerateInterpolator(); repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE }
+                box.addView(icon, lp(side))
+                label = TextView(ctx) // off-screen: the pill is a single strip
+                bob = dancer(mascot!!, dp(2).toFloat())
                 root = box
+                val total = 2 * side + ringLen // camera sits in the middle segment
                 var taps = 0; var last = 0L
                 box.setOnClickListener {
                     val now = System.currentTimeMillis()
@@ -304,8 +371,10 @@ class Overlay(base: Context) {
                     if (taps >= 3) { taps = 0; closeNow() }
                 }
                 val flags = base or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                wm.addView(box, params(-2, -2, flags, Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0).also {
-                    it.x = (cut.centerX() - screenWidth() / 2)
+                wm.addView(box, params(-2, -2, flags, Gravity.TOP or Gravity.START, 0).also {
+                    // absolute position so the middle segment lands exactly on the camera, whatever the edge
+                    if (vertical) { it.x = (cut.left - rim).coerceAtLeast(0); it.y = (cut.centerY() - total / 2).coerceAtLeast(0) }
+                    else { it.x = (cut.centerX() - total / 2).coerceAtLeast(0); it.y = (cut.top - rim).coerceAtLeast(0) }
                     if (Build.VERSION.SDK_INT >= 30) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                     else if (Build.VERSION.SDK_INT >= 28) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 })
@@ -325,7 +394,7 @@ class Overlay(base: Context) {
                 icon.addView(spinner, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
                 icon.addView(mark, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
                 col.addView(icon, LinearLayout.LayoutParams(dp(28), dp(28)))
-                bob = ObjectAnimator.ofFloat(mascot, "translationY", dp(1).toFloat(), -dp(1).toFloat()).apply { duration = 1000; interpolator = android.view.animation.AccelerateDecelerateInterpolator(); repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE }
+                bob = dancer(mascot!!, dp(3).toFloat())
                 col.setOnLongClickListener { Prefs.overlay.value = "pill"; true }
                 var flags = base or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 if (Prefs.screenOn.value) flags = flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
@@ -344,10 +413,10 @@ class Overlay(base: Context) {
     }
 
     fun hide() {
-        pulse?.cancel(); bob?.cancel(); eyes?.cancel()
+        pulse?.cancel(); bob?.cancel(); eyes?.cancel(); bBob?.cancel()
         root?.let { try { wm.removeView(it) } catch (e: Exception) { } }
         blackLayer?.let { try { wm.removeView(it) } catch (e: Exception) { } }; blackLayer = null
-        bStatus = null; bDet = null; bLast = null; bBatt = null
+        bStatus = null; bDet = null; bLast = null; bBatt = null; bMascot = null; bBob = null
         root = null; style = ""
         mascot = null; spinner = null; mark = null; label = null; sub = null; bar = null; pulse = null; bob = null; eyes = null; ring = null
         lastStatus = null

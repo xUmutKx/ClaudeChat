@@ -73,6 +73,10 @@ object Prefs {
     lateinit var blackFont: S    // clock font: thin / regular / bold / mono / serif / cursive
     lateinit var blackStyle: S   // digital / stacked / analog / ticks
     lateinit var blackSize: S    // clock size, sp
+    lateinit var danceMode: S    // mascot animation: steps (frame by frame) / smooth
+    lateinit var pillColor: S   // pill background: black / white
+    lateinit var pillGap: S      // extra room around the camera ring, dp (0..8)
+    lateinit var pillOutfit: S   // mascot outfit: none / wizard / crown / party / bow
     lateinit var dynamic: B
     lateinit var keepAlive: B
     lateinit var autoStart: B
@@ -101,11 +105,15 @@ object Prefs {
         blackStatus = B("blackStatus", true)
         blackLast = B("blackLast", true)
         blackBattery = B("blackBattery", true)
-        blackMascot = B("blackMascot", false)
+        blackMascot = B("blackMascot", true)
         blackText = S("blackText", "")
         blackFont = S("blackFont", "outfit")
         blackSize = S("blackSize", "72")
         blackStyle = S("blackStyle", "digital")
+        danceMode = S("danceMode", "steps")
+        pillColor = S("pillColor", "black")
+        pillGap = S("pillGap", "1")
+        pillOutfit = S("pillOutfit", "none")
         dynamic = B("dynamic", false)
         keepAlive = B("keepAlive", true)
         autoStart = B("autoStart", true)

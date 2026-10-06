@@ -2,13 +2,22 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="wrap_content"
     android:orientation="horizontal" android:gravity="center_vertical">
-    <ViewFlipper android:id="@+id/dancer" android:layout_width="56dp" android:layout_height="56dp" android:autoStart="true" android:flipInterval="700">
+    <!-- same 4 frames as Dance in Chat.kt: hop up, tilt left (low), tilt right (up), down -->
+    <ViewFlipper android:id="@+id/dancer" android:layout_width="56dp" android:layout_height="56dp" android:autoStart="true" android:flipInterval="280">
         <FrameLayout android:layout_width="56dp" android:layout_height="56dp">
-            <ImageView android:layout_width="48dp" android:layout_height="34dp" android:layout_gravity="top|center_horizontal" android:layout_marginTop="7dp"
+            <ImageView android:layout_width="48dp" android:layout_height="34dp" android:layout_gravity="top|center_horizontal" android:layout_marginTop="8dp"
                 android:src="@drawable/ic_mascot" android:scaleType="fitCenter" />
         </FrameLayout>
         <FrameLayout android:layout_width="56dp" android:layout_height="56dp">
-            <ImageView android:layout_width="48dp" android:layout_height="34dp" android:layout_gravity="top|center_horizontal" android:layout_marginTop="12dp"
+            <ImageView android:layout_width="48dp" android:layout_height="34dp" android:layout_gravity="top|center_horizontal" android:layout_marginTop="14dp"
+                android:rotation="-12" android:src="@drawable/ic_mascot" android:scaleType="fitCenter" />
+        </FrameLayout>
+        <FrameLayout android:layout_width="56dp" android:layout_height="56dp">
+            <ImageView android:layout_width="48dp" android:layout_height="34dp" android:layout_gravity="top|center_horizontal" android:layout_marginTop="8dp"
+                android:rotation="12" android:src="@drawable/ic_mascot" android:scaleType="fitCenter" />
+        </FrameLayout>
+        <FrameLayout android:layout_width="56dp" android:layout_height="56dp">
+            <ImageView android:layout_width="48dp" android:layout_height="34dp" android:layout_gravity="top|center_horizontal" android:layout_marginTop="14dp"
                 android:src="@drawable/ic_mascot" android:scaleType="fitCenter" />
         </FrameLayout>
     </ViewFlipper>

@@ -57,5 +57,8 @@ fun ClaudeTheme(content: @Composable () -> Unit) {
             surfaceContainer = Color(0xFF111111), surfaceContainerHigh = Color(0xFF1A1A1A), surfaceContainerHighest = Color(0xFF232323),
         )
     }
-    MaterialTheme(colorScheme = scheme, content = content)
+    // Text outside a Surface would otherwise fall back to black content colour (invisible on dark backgrounds)
+    MaterialTheme(colorScheme = scheme) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalContentColor provides scheme.onBackground, content = content)
+    }
 }

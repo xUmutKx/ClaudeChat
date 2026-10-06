@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 
 object Notifier {
@@ -55,7 +56,7 @@ class KeepAliveService : Service() {
         startFg(getString(R.string.status_idle))
         overlay = Overlay(applicationContext)
         scope.launch {
-            combine(Engine.status, Engine.detail, Engine.messages, Prefs.overlay.flow.combine(Prefs.black.flow) { s, b -> if (b) (if (s == "off") "pill" else s) + "+black" else s }, Prefs.keepAlive.flow) { st, det, msgs, style, keep ->
+            combine(Engine.overall, Engine.overallDetail, Engine.messages, Prefs.overlay.flow.combine(Prefs.black.flow) { s, b -> if (b) (if (s == "off") "pill" else s) + "+black" else s }, Prefs.keepAlive.flow) { st, det, msgs, style, keep ->
                 Snap(st, det, msgs.lastOrNull { it.role == Role.Claude }?.text.orEmpty(), style, keep)
             }.collect { apply(it) }
         }
@@ -63,7 +64,7 @@ class KeepAliveService : Service() {
             delay(20_000)
             var fails = 0
             while (true) {
-                if (Prefs.autoStart.value && Engine.status.value != Status.Working) {
+                if (Prefs.autoStart.value && !Engine.overall.value.running) {
                     if (Engine.ping() == 200) fails = 0
                     else if (++fails >= 2) { fails = 0; Termux.startBridge(applicationContext) }
                 }
@@ -78,12 +79,16 @@ class KeepAliveService : Service() {
                 Prefs.blackFont.flow.map { }, Prefs.blackStyle.flow.map { }, Prefs.blackSize.flow.map { },
             ).collect { overlay.refreshBlack() }
         }
+        scope.launch { // pill look changed (colour, gap, outfit): rebuild it
+            kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { })
+                .drop(4).collect { overlay.onRotate() }
+        }
     }
 
     private data class Snap(val st: Status, val det: String, val last: String, val style: String, val keep: Boolean)
 
     private fun label(st: Status, det: String) = when (st) {
-        Status.Working -> det.ifEmpty { getString(R.string.status_working) }
+        Status.Working, Status.Background -> det.ifEmpty { getString(R.string.status_working) }
         Status.Done -> getString(R.string.status_done)
         Status.Error -> getString(R.string.status_error)
         Status.Offline -> getString(R.string.status_offline)
@@ -91,16 +96,16 @@ class KeepAliveService : Service() {
     }
 
     private fun apply(s: Snap) {
-        startFg(label(s.st, s.det), s.st == Status.Working)
+        startFg(label(s.st, s.det), s.st.running)
         overlay.render(s.style, s.st, s.det, s.last)
-        val hold = s.keep || s.st == Status.Working
+        val hold = s.keep || s.st.running
         if (hold && wl == null) {
             wl = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "claudechat:keep").apply { acquire() }
         } else if (!hold) {
             wl?.release(); wl = null
         }
         stopJob?.cancel()
-        if (!s.keep && s.st != Status.Working && s.style == "off") {
+        if (!s.keep && !s.st.running && s.style == "off") {
             stopJob = scope.launch { delay(12_000); stopSelf() }
         }
     }
@@ -135,11 +140,17 @@ class KeepAliveService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             scope.cancel(); overlay.hide()
-            Engine.stop()
+            Engine.stopAll()
             stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
             return START_NOT_STICKY
         }
         return START_STICKY
+    }
+
+    // the camera moves to another edge when the screen rotates: re-place (and re-orient) the pill
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::overlay.isInitialized) overlay.onRotate()
     }
 
     override fun onDestroy() {

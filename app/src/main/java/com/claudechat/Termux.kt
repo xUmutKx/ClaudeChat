@@ -47,7 +47,7 @@ object Termux {
         val port = Prefs.port.value.filter(Char::isDigit).ifEmpty { "8787" }
         val token = cleanToken()
         return "mkdir -p /root/claudechat; : > /root/claudechat/bridge.log; echo $b64 | base64 -d > /root/claudechat/bridge.js; " +
-            "pkill -f 'node /root/claudechat/[b]ridge.js'; sleep 0.3; " +
+            "pkill -f '^node /root/claudechat/bridge.js'; sleep 0.3;" +
             "CC_TOKEN=$token CC_PORT=$port exec node /root/claudechat/bridge.js" + if (toFile) " >>/root/claudechat/bridge.log 2>&1" else ""
     }
 
@@ -84,17 +84,26 @@ object Termux {
         }.start()
         repeat(90) { // cold proot-distro start can take a while; do not kill it early
             Thread.sleep(500)
-            if (pingBlocking()) return true
-            if (!p.isAlive) return false
+            if (pingBlocking()) { guard(); return true }
         }
         return false
+    }
+
+    /** Root watchdog (detached): keeps proot/node/claude at a low oom_score_adj so Android's killer picks them last. */
+    private fun guard() {
+        val loop = "while :; do for p in \\\$(pgrep -f 'proot|claudechat/bridge|claude'); do echo -900 > /proc/\\\$p/oom_score_adj; done; sleep 15; done"
+        try {
+            ProcessBuilder("su", "-c", "pgrep -f 'oom_score_a[d]j' >/dev/null || setsid nohup sh -c \"$loop\" >/dev/null 2>&1 </dev/null &")
+                .redirectErrorStream(true).start().waitFor()
+        } catch (e: Exception) { }
     }
 
     private fun suChain(c: Context): Boolean {
         val uid = termuxUid(c)
         val env = "export PREFIX=$USR HOME=$HOME TMPDIR=$USR/tmp PATH=$USR/bin:$USR/bin/applets:/system/bin LANG=en_US.UTF-8; " +
             "for f in $USR/lib/libtermux-exec*.so; do [ -e \"\$f\" ] && export LD_PRELOAD=\$f && break; done; "
-        val script = env + "exec $USR/bin/proot-distro login ${distro()} -- bash -lc " + shQuote(inner(c, true))
+        // detached (own session, reparented to init) so it is not a child of the app/Termux and survives their death
+        val script = env + "setsid nohup $USR/bin/proot-distro login ${distro()} -- bash -lc " + shQuote(inner(c, true)) + " >/dev/null 2>&1 </dev/null &"
         // Phantom-process / doze tweaks first (not persistent), then the launcher as Termux's own uid when possible, else as root.
         try { ProcessBuilder("su", "-c", tweakCmds(c).joinToString("; ")).redirectErrorStream(true).start().waitFor() } catch (e: Exception) { log = "su: ${e.message}"; return false }
         val tries = buildList {

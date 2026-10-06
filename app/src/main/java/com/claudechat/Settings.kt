@@ -14,7 +14,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.QueryStats
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -57,8 +69,26 @@ private fun Sub(title: Int) {
 
 @Composable
 private fun Section(title: Int, content: @Composable ColumnScope.() -> Unit) {
+    val icon = when (title) {
+        R.string.sec_method -> Icons.Filled.Link
+        R.string.sec_usage -> Icons.Filled.QueryStats
+        R.string.sec_appearance -> Icons.Filled.Palette
+        R.string.sec_overlay -> Icons.Filled.PhoneAndroid
+        R.string.sec_black -> Icons.Filled.DarkMode
+        R.string.sec_claude -> Icons.Filled.Tune
+        R.string.sec_keep -> Icons.Filled.Bolt
+        R.string.g_battery_title -> Icons.Filled.BatteryChargingFull
+        R.string.g_wake_title -> Icons.Filled.Lock
+        R.string.g_overlay_title -> Icons.Filled.Layers
+        R.string.g_root_title -> Icons.Filled.Build
+        R.string.g_phantom_title -> Icons.Filled.Shield
+        else -> null
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(title), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (icon != null) Icon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            Text(stringResource(title), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        }
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), shape = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
         }
@@ -133,6 +163,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
     LaunchedEffect(tick) { bridge = Engine.ping() }
 
     var adv by remember { mutableStateOf(false) }
+    var det by remember { mutableStateOf(false) }
     Page(R.string.settings, onBack) {
         Section(R.string.sec_method) {
             val up = bridge == 200
@@ -144,14 +175,18 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
             Button({
                 scope.launch {
                     bridge = -2
-                    Termux.startBridge(ctx)?.let { bridge = -1; return@launch }
+                    // one tap does everything: grants Termux permission through root (silently ignored without root), then starts the bridge
+                    withContext(Dispatchers.IO) { Termux.rootSetup() }
+                    Termux.startBridge(ctx)?.let { bridge = -1; det = true; return@launch }
                     repeat(75) { kotlinx.coroutines.delay(1000); val p = Engine.ping(); if (p == 200) { bridge = p; return@launch } }
-                    bridge = -1
+                    bridge = -1; det = true
                 }
-            }) { Text(stringResource(R.string.start_bridge)) }
+            }, Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(if (up) R.string.start_bridge else R.string.connect_now)) }
             if (bridge == 401) Hint(stringResource(R.string.bridge_401))
             if (!up && Termux.log.isNotBlank()) Hint(Termux.log.trim().takeLast(400))
 
+            TextButton({ det = !det }) { Text(stringResource(if (det) R.string.adv_hide else R.string.conn_details)) }
+            if (det) {
             Sub(R.string.sec_termux)
             run {
             val inst = remember(tick) { Termux.installed(ctx) }
@@ -181,6 +216,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
             OutlinedTextField(Prefs.distro.value, { Prefs.distro.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.distro)) }, singleLine = true)
             OutlinedTextField(token, { token = it; Prefs.token.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.token)) }, singleLine = true,
                 trailingIcon = { TextButton({ token = Prefs.randomToken(); Prefs.token.value = token }) { Text(stringResource(R.string.regenerate)) } })
+            }
             SwitchRow(R.string.auto_start, null, auto) { Prefs.autoStart.value = it }
         }
 
@@ -209,6 +245,21 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit) 
 
         Section(R.string.sec_overlay) {
             Choices(listOf("off" to R.string.ov_style_off, "pill" to R.string.ov_style_pill, "line" to R.string.ov_style_line, "curtain" to R.string.ov_style_curtain), overlay) { Prefs.overlay.value = it }
+            val dance by Prefs.danceMode.flow.collectAsState()
+            Text(stringResource(R.string.dance_mode), style = MaterialTheme.typography.bodyLarge)
+            Choices(listOf("steps" to R.string.dm_steps, "smooth" to R.string.dm_smooth), dance) { Prefs.danceMode.value = it }
+            if (overlay == "pill") {
+                val pColor by Prefs.pillColor.flow.collectAsState()
+                val pGap by Prefs.pillGap.flow.collectAsState()
+                val pOutfit by Prefs.pillOutfit.flow.collectAsState()
+                var gap by remember { mutableFloatStateOf((pGap.toFloatOrNull() ?: 1f).coerceIn(0f, 8f)) }
+                Text(stringResource(R.string.pill_color), style = MaterialTheme.typography.bodyLarge)
+                Choices(listOf("black" to R.string.pc_black, "white" to R.string.pc_white), pColor) { Prefs.pillColor.value = it }
+                Text(stringResource(R.string.pill_gap, gap.toInt()), style = MaterialTheme.typography.bodyLarge)
+                Slider(gap, { gap = it }, valueRange = 0f..8f, steps = 7, onValueChangeFinished = { Prefs.pillGap.value = gap.toInt().toString() })
+                Text(stringResource(R.string.pill_outfit), style = MaterialTheme.typography.bodyLarge)
+                Choices(listOf("none" to R.string.po_none, "wizard" to R.string.po_wizard, "crown" to R.string.po_crown, "party" to R.string.po_party, "bow" to R.string.po_bow), pOutfit) { Prefs.pillOutfit.value = it }
+            }
             if (!canOverlay && overlay != "off") {
                 Hint(stringResource(R.string.overlay_perm_sub))
                 Button({ ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))) }) { Text(stringResource(R.string.grant)) }

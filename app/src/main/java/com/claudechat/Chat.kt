@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -52,6 +53,7 @@ import java.util.Date
 
 fun statusColor(s: Status) = when (s) {
     Status.Working -> Color(0xFFFF9800)
+    Status.Background -> Color(0xFF2196F3)
     Status.Done -> Color(0xFF4CAF50)
     Status.Error -> Color(0xFFF44336)
     Status.Offline -> Color(0xFF9E9E9E)
@@ -60,7 +62,7 @@ fun statusColor(s: Status) = when (s) {
 
 @Composable
 fun statusText(s: Status, det: String) = when (s) {
-    Status.Working -> det.ifEmpty { stringResource(R.string.status_working) }
+    Status.Working, Status.Background -> det.ifEmpty { stringResource(R.string.status_working) }
     Status.Done -> stringResource(R.string.status_done)
     Status.Error -> stringResource(R.string.status_error)
     Status.Offline -> stringResource(R.string.status_offline)
@@ -129,7 +131,7 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(42.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-                Image(painterResource(R.drawable.ic_mascot), null, Modifier.size(28.dp, 20.dp))
+                Mascot(st == Status.Working, Modifier.size(28.dp, 20.dp), sleeping = st == Status.Idle)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(onClick = onModel)) {
@@ -141,19 +143,74 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
                 }
             }
             IconButton({ Prefs.black.value = !Prefs.black.value }) { Icon(Icons.Outlined.DarkMode, stringResource(R.string.black_mode)) }
-            IconButton({ Engine.newChat() }) { Icon(Icons.Outlined.AddComment, stringResource(R.string.new_chat)) }
             IconButton(onChats) { Icon(Icons.Outlined.FormatListBulleted, stringResource(R.string.chats_title)) }
             IconButton(onSettings) { Icon(Icons.Outlined.Settings, stringResource(R.string.settings)) }
         }
     }
 }
 
+/** One shared dance for the notification, island, pill, AOD and chat: slow stepped frames, tilts left/right, then straight hops. */
+object Dance {
+    const val FRAME_MS = 280L
+    /** 4 frames: straight hop up, tilt left (low), tilt right (up, diagonal), straight down */
+    val ROT = floatArrayOf(0f, -12f, 12f, 0f)
+    /** 0 = down, 1 = up (scaled by each place's hop height) */
+    val UP = floatArrayOf(1f, 0f, 1f, 0f)
+}
+
+/** The mascot; while Claude works it dances in the same stepped frames as the notification. */
+@Composable
+fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false) {
+    if (sleeping && !working) { // idle: eyes closed and a drifting "z"
+        val t = rememberInfiniteTransition(label = "zzz")
+        val a by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "z")
+        Box(contentAlignment = Alignment.TopEnd) {
+            Image(painterResource(R.drawable.ic_mascot_sleep), null, modifier)
+            Text("z", Modifier.offset(x = 6.dp, y = (-7).dp).graphicsLayer { alpha = a }, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+        }
+        return
+    }
+    val img = painterResource(R.drawable.ic_mascot)
+    if (!working) { Image(img, null, modifier); return }
+    val n = Dance.ROT.size
+    if (Prefs.danceMode.flow.collectAsState().value == "smooth") {
+        // glide between the same 4 poses
+        val p by rememberInfiniteTransition(label = "dance").animateFloat(0f, n.toFloat(), infiniteRepeatable(tween((Dance.FRAME_MS * n).toInt(), easing = LinearEasing)), label = "p")
+        Image(img, null, modifier.graphicsLayer {
+            val i = p.toInt().coerceIn(0, n - 1); val f = p - i; val j = (i + 1) % n
+            rotationZ = Dance.ROT[i] + (Dance.ROT[j] - Dance.ROT[i]) * f
+            translationY = -(Dance.UP[i] + (Dance.UP[j] - Dance.UP[i]) * f) * 3.dp.toPx()
+        })
+    } else {
+        var frame by remember { mutableStateOf(0) }
+        LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(Dance.FRAME_MS); frame = (frame + 1) % n } }
+        Image(img, null, modifier.graphicsLayer { rotationZ = Dance.ROT[frame]; translationY = -Dance.UP[frame] * 3.dp.toPx() })
+    }
+}
+
 @Composable
 private fun EmptyState() {
+    val bridge by Engine.bridge.collectAsState()
+    val err by Engine.bridgeError.collectAsState()
+    LaunchedEffect(Unit) { Engine.checkBridge() }
     Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Image(painterResource(R.drawable.ic_mascot), null, Modifier.size(120.dp, 84.dp))
         Spacer(Modifier.height(20.dp))
         Text(stringResource(R.string.empty_title), fontFamily = FontFamily.Serif, fontSize = 28.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        // one tap: starts the bridge with the current token (also done by itself when auto-start is on)
+        if (bridge != 200) {
+            Spacer(Modifier.height(20.dp))
+            if (bridge == 0 || bridge == -2) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(stringResource(if (bridge == 0) R.string.starting_bridge else R.string.checking), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                Button({ Engine.connect() }) { Text(stringResource(R.string.start_claude)) }
+                if (err.isNotBlank()) Text(err.take(300), Modifier.padding(top = 10.dp), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
     }
 }
 

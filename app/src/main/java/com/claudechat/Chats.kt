@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
     val chats by Engine.chats.collectAsState()
     val cur by Engine.currentId.collectAsState()
+    val busy by Engine.busy.collectAsState()
     val list = chats.filter { it.title.isNotEmpty() }.sortedByDescending { it.updated }
     var del by remember { mutableStateOf<Chat?>(null) }
 
@@ -45,7 +46,7 @@ fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
             items(list, key = { it.id }) { c ->
                 Row(Modifier.fillMaxWidth().clickable { Engine.openChat(c.id); onOpen() }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(46.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-                        Image(painterResource(R.drawable.ic_mascot), null, Modifier.size(28.dp, 20.dp))
+                        Mascot(c.id in busy, Modifier.size(28.dp, 20.dp))
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
