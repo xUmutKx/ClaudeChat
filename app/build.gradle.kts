@@ -11,8 +11,8 @@ android {
         applicationId = "com.claudechat.app"
         minSdk = 29
         targetSdk = 34
-        versionCode = 18
-        versionName = "0.9.8"
+        versionCode = 19
+        versionName = "0.9.9"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {

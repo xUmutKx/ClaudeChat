@@ -32,12 +32,16 @@ const server = http.createServer(async (req, res) => {
   // claude is kept alive between turns (stream-json input): no start-up cost and a warm prompt cache.
   let mode = MODES.has(body.mode) ? body.mode : 'acceptEdits';
   // claude refuses bypassPermissions when running as root, so fall back to acceptEdits there
-  if (mode === 'bypassPermissions' && process.getuid && process.getuid() === 0) mode = 'acceptEdits';
+  let wantBypass = mode === 'bypassPermissions';
+  if (wantBypass && process.getuid && process.getuid() === 0) mode = 'acceptEdits';
+  // non-interactive (-p) turns cannot answer permission prompts, so anything not pre-allowed is silently denied.
+  // Root cannot use bypassPermissions: when the user asked for it, allow every tool instead; otherwise allow the usual build/ship commands.
+  const allow = wantBypass ? ['Bash', 'WebFetch', 'WebSearch'] : ['Bash(su:*)', 'Bash(gh:*)', 'Bash(gradle:*)', 'Bash(git:*)', 'Bash(node:*)', 'Bash(cd:*)', 'Bash(export:*)'];
   const model = typeof body.model === 'string' && /^[\w.\-\[\]]{1,80}$/.test(body.model) ? body.model : '';
   const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(body.effort) ? body.effort : '';
   const addDir = typeof body.addDir === 'string' && body.addDir.startsWith('/') ? body.addDir : '';
   const cwd = body.cwd || '/root/projects';
-  const key = JSON.stringify([cwd, mode, model, effort, addDir]);
+  const key = JSON.stringify([cwd, mode, model, effort, addDir, wantBypass]);
 
   const reuse = proc && proc.child.exitCode === null && !proc.sink && proc.key === key && body.session && body.session === proc.session;
   if (!reuse) {
@@ -48,6 +52,7 @@ const server = http.createServer(async (req, res) => {
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
     args.push('--permission-mode', mode);
+    args.push('--allowedTools', allow.join(','));
     const child = spawn('claude', args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     const p = { child, key, session: body.session ? String(body.session) : '', sink: null, buf: '', err: '' };
     proc = p;
