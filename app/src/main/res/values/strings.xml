@@ -2,6 +2,7 @@
     <string name="app_name">Claude Chat</string>
     <string name="status_idle">Idle</string>
     <string name="status_working">Working…</string>
+    <string name="status_bg">Working in another chat…</string>
     <string name="status_done">Done</string>
     <string name="status_error">Error</string>
     <string name="status_offline">Bridge offline</string>

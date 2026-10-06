@@ -62,7 +62,8 @@ fun statusColor(s: Status) = when (s) {
 
 @Composable
 fun statusText(s: Status, det: String) = when (s) {
-    Status.Working, Status.Background -> det.ifEmpty { stringResource(R.string.status_working) }
+    Status.Working -> det.ifEmpty { stringResource(R.string.status_working) }
+    Status.Background -> det.ifEmpty { stringResource(R.string.status_bg) }
     Status.Done -> stringResource(R.string.status_done)
     Status.Error -> stringResource(R.string.status_error)
     Status.Offline -> stringResource(R.string.status_offline)
@@ -96,7 +97,10 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit) {
     val showTyping = working && (msgs.lastOrNull()?.role.let { it == null || it == Role.User || it == Role.Tool })
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).navigationBarsPadding().imePadding()) {
-        TopBar(title, st, det, model.ifEmpty { shortModel(modelSeen) }, { sheet = true }, onChats, onSettings)
+        // this chat looks finished but another chat still works in the background: say so (blue) instead of "Done"
+        val overall by Engine.overall.collectAsState()
+        val shownSt = if (st != Status.Working && overall == Status.Background) Status.Background else st
+        TopBar(title, shownSt, if (shownSt == Status.Background) Engine.overallDetail.collectAsState().value else det, model.ifEmpty { shortModel(modelSeen) }, { sheet = true }, onChats, onSettings)
         if (sheet) OptionsSheet { sheet = false }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (msgs.isEmpty() && !working) EmptyState()
@@ -131,7 +135,7 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(42.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-                Mascot(st == Status.Working, Modifier.size(28.dp, 20.dp), sleeping = st == Status.Idle)
+                Mascot(st.running, Modifier.size(28.dp, 20.dp), sleeping = st == Status.Idle)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(onClick = onModel)) {

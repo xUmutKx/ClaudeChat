@@ -340,7 +340,8 @@ class Overlay(base: Context) {
                 val vertical = edge == Edge.LEFT || edge == Edge.RIGHT // camera on a side edge (landscape): stand the pill up
                 val rim = dp(Prefs.pillGap.value.toIntOrNull()?.coerceIn(0, 8) ?: 1) // equal rim on both sides of the camera: more room = the ring floats further out
                 val hole = (if (vertical) cut.width() else cut.height()).coerceAtLeast(dp(18))
-                val thick = hole + 2 * rim // pill thickness across the edge
+                val trim = 1 // px taken off each long side of the pill (the pill is 2 px thinner than the camera rim)
+                val thick = hole + 2 * rim - 2 * trim // pill thickness across the edge
                 val ringLen = (if (vertical) cut.height() else cut.width()) + 2 * rim + dp(6)
                 val side = dp(40)
                 val box = LinearLayout(ctx).apply {
@@ -373,8 +374,8 @@ class Overlay(base: Context) {
                 val flags = base or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 wm.addView(box, params(-2, -2, flags, Gravity.TOP or Gravity.START, 0).also {
                     // absolute position so the middle segment lands exactly on the camera, whatever the edge
-                    if (vertical) { it.x = (cut.left - rim).coerceAtLeast(0); it.y = (cut.centerY() - total / 2).coerceAtLeast(0) }
-                    else { it.x = (cut.centerX() - total / 2).coerceAtLeast(0); it.y = (cut.top - rim).coerceAtLeast(0) }
+                    if (vertical) { it.x = (cut.left - rim + trim).coerceAtLeast(0); it.y = (cut.centerY() - total / 2).coerceAtLeast(0) }
+                    else { it.x = (cut.centerX() - total / 2).coerceAtLeast(0); it.y = (cut.top - rim + trim).coerceAtLeast(0) }
                     if (Build.VERSION.SDK_INT >= 30) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                     else if (Build.VERSION.SDK_INT >= 28) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 })

@@ -2,6 +2,7 @@
     <string name="app_name">Claude Chat</string>
     <string name="status_idle">Boşta</string>
     <string name="status_working">Çalışıyor…</string>
+    <string name="status_bg">Başka sohbette çalışıyor…</string>
     <string name="status_done">Bitti</string>
     <string name="status_error">Hata</string>
     <string name="status_offline">Köprü kapalı</string>
