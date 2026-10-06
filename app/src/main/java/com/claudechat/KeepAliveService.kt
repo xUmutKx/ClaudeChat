@@ -32,7 +32,7 @@ object Notifier {
         if (Prefs.overlay.value != "off" && !error) return // the island already shows the result
         val l = c.localized()
         val n = NotificationCompat.Builder(l, CH_DONE)
-            .setSmallIcon(R.drawable.ic_stat_mascot)
+            .setSmallIcon(Outfit.statIcon())
             .setContentTitle(l.getString(if (error) R.string.error_title else R.string.done_title))
             .setContentText(text.take(160))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(600)))
@@ -81,8 +81,9 @@ class KeepAliveService : Service() {
         }
         scope.launch { // pill look changed (colour, gap, outfit): rebuild it
             kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { })
-                .drop(4).collect { overlay.onRotate() }
+                .drop(4).collect { overlay.onRotate(); startFg(fgText, fgWorking ?: false) }
         }
+        scope.launch { AppState.foreground.collect { overlay.setQuiet(it) } } // chat open: its header mascot shows the status, so the pill hides
     }
 
     private data class Snap(val st: Status, val det: String, val last: String, val style: String, val keep: Boolean)
@@ -112,19 +113,26 @@ class KeepAliveService : Service() {
 
     private var fgText = ""
     private var fgWorking: Boolean? = null
+    private var fgOutfit = ""
 
     // The flipper animates inside the notification by itself, so the notification is not re-posted to "dance".
     private fun view(text: String, working: Boolean): android.widget.RemoteViews =
         android.widget.RemoteViews(packageName, if (working) R.layout.notif_dance else R.layout.notif_still).apply {
             setTextViewText(R.id.ntitle, getString(R.string.notif_keep_title))
             setTextViewText(R.id.ntext, text)
+            val hat = Outfit.hat()
+            val ids = if (working) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2, R.id.m3 to R.id.h3, R.id.m4 to R.id.h4) else listOf(R.id.m1 to R.id.h1)
+            ids.forEach { (m, h) ->
+                if (hat != 0) { setImageViewResource(m, R.drawable.ic_mascot18); setImageViewResource(h, hat); setViewVisibility(h, android.view.View.VISIBLE) }
+            }
         }
 
     private fun startFg(text: String, working: Boolean = false) {
-        if (text == fgText && fgWorking == working) return // identical: do not re-post the notification
-        fgText = text; fgWorking = working
+        val outfit = Prefs.pillOutfit.value
+        if (text == fgText && fgWorking == working && fgOutfit == outfit) return // identical: do not re-post the notification
+        fgText = text; fgWorking = working; fgOutfit = outfit
         val n = NotificationCompat.Builder(this, Notifier.CH_KEEP)
-            .setSmallIcon(R.drawable.ic_stat_mascot)
+            .setSmallIcon(Outfit.statIcon())
             .setContentTitle(getString(R.string.notif_keep_title))
             .setContentText(text)
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())

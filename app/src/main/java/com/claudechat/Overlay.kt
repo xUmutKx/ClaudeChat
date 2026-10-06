@@ -152,6 +152,15 @@ class Overlay(base: Context) {
             lastStatus = st
             if (st.running || st == Status.Done) mascot?.let { playEyesAnimation(it) }
         }
+        applyQuiet()
+    }
+
+    /** While the chat is open the pill/curtain are hidden but stay attached (the window itself keeps Termux alive). */
+    private var quiet = false
+    fun setQuiet(q: Boolean) { quiet = q; applyQuiet() }
+    private fun applyQuiet() {
+        val v = if (quiet) View.INVISIBLE else View.VISIBLE
+        root?.visibility = v; blackLayer?.visibility = v
     }
 
     /** Mascot pops bigger (eyes widen) on start/finish, then settles back. */

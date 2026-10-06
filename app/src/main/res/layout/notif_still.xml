@@ -3,8 +3,8 @@
     android:layout_width="match_parent" android:layout_height="wrap_content"
     android:orientation="horizontal" android:gravity="center_vertical">
     <FrameLayout android:id="@+id/dancer" android:layout_width="56dp" android:layout_height="56dp">
-        <ImageView android:layout_width="48dp" android:layout_height="34dp" android:layout_gravity="top|center_horizontal" android:layout_marginTop="9dp"
-            android:src="@drawable/ic_mascot" android:scaleType="fitCenter" />
+        <ImageView android:id="@+id/m1" android:layout_width="48dp" android:layout_height="43dp" android:layout_gravity="top|center_horizontal" android:layout_marginTop="0dp" android:src="@drawable/ic_mascot" android:scaleType="fitEnd" />
+            <ImageView android:id="@+id/h1" android:layout_width="48dp" android:layout_height="43dp" android:layout_gravity="top|center_horizontal" android:layout_marginTop="0dp" android:visibility="gone" android:scaleType="fitEnd" />
     </FrameLayout>
     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
         android:orientation="vertical" android:paddingStart="8dp">

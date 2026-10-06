@@ -48,6 +48,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onStart() { super.onStart(); Engine.appVisible = true }
-    override fun onStop() { Engine.appVisible = false; super.onStop() }
+    override fun onStart() { super.onStart(); Engine.appVisible = true; AppState.foreground.value = true }
+    override fun onStop() { Engine.appVisible = false; AppState.foreground.value = false; super.onStop() }
 }

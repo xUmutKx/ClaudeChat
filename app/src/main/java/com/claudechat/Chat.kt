@@ -162,6 +162,17 @@ object Dance {
     val UP = floatArrayOf(1f, 0f, 1f, 0f)
 }
 
+/** Mascot picture with the chosen outfit's hat on top (same pixel canvas as the pill's). */
+@Composable
+private fun MascotImg(sleeping: Boolean, modifier: Modifier) {
+    val hat = Outfit.hat(Prefs.pillOutfit.flow.collectAsState().value)
+    if (hat == 0) { Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot), null, modifier); return }
+    Box(modifier) {
+        Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), null, Modifier.fillMaxSize())
+        Image(painterResource(hat), null, Modifier.fillMaxSize())
+    }
+}
+
 /** The mascot; while Claude works it dances in the same stepped frames as the notification. */
 @Composable
 fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false) {
@@ -169,18 +180,17 @@ fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false) {
         val t = rememberInfiniteTransition(label = "zzz")
         val a by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "z")
         Box(contentAlignment = Alignment.TopEnd) {
-            Image(painterResource(R.drawable.ic_mascot_sleep), null, modifier)
+            MascotImg(true, modifier)
             Text("z", Modifier.offset(x = 6.dp, y = (-7).dp).graphicsLayer { alpha = a }, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         }
         return
     }
-    val img = painterResource(R.drawable.ic_mascot)
-    if (!working) { Image(img, null, modifier); return }
+    if (!working) { MascotImg(false, modifier); return }
     val n = Dance.ROT.size
     if (Prefs.danceMode.flow.collectAsState().value == "smooth") {
         // glide between the same 4 poses
         val p by rememberInfiniteTransition(label = "dance").animateFloat(0f, n.toFloat(), infiniteRepeatable(tween((Dance.FRAME_MS * n).toInt(), easing = LinearEasing)), label = "p")
-        Image(img, null, modifier.graphicsLayer {
+        MascotImg(false, modifier.graphicsLayer {
             val i = p.toInt().coerceIn(0, n - 1); val f = p - i; val j = (i + 1) % n
             rotationZ = Dance.ROT[i] + (Dance.ROT[j] - Dance.ROT[i]) * f
             translationY = -(Dance.UP[i] + (Dance.UP[j] - Dance.UP[i]) * f) * 3.dp.toPx()
@@ -188,7 +198,7 @@ fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false) {
     } else {
         var frame by remember { mutableStateOf(0) }
         LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(Dance.FRAME_MS); frame = (frame + 1) % n } }
-        Image(img, null, modifier.graphicsLayer { rotationZ = Dance.ROT[frame]; translationY = -Dance.UP[frame] * 3.dp.toPx() })
+        MascotImg(false, modifier.graphicsLayer { rotationZ = Dance.ROT[frame]; translationY = -Dance.UP[frame] * 3.dp.toPx() })
     }
 }
 
