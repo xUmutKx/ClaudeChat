@@ -351,6 +351,7 @@ private fun MessageBody(m: Msg, lastInGroup: Boolean, onSettings: () -> Unit) {
                             }
                         }
                     }
+                    CopyBtn(if (m.text.startsWith("↩ ")) m.text.substringAfter("\n\n", "") else m.text)
                 }
             } else {
                 val fg = if (err) cs.onErrorContainer else cs.onSurface
@@ -360,9 +361,21 @@ private fun MessageBody(m: Msg, lastInGroup: Boolean, onSettings: () -> Unit) {
                     if (m.action) TextButton(onSettings, contentPadding = PaddingValues(0.dp)) { Text(stringResource(R.string.sec_method)) }
                 }
                 if (err) Surface(shape = RoundedCornerShape(16.dp), color = cs.errorContainer) { Column(Modifier.padding(14.dp)) { body() } }
-                else Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { body() }
+                else Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) { body(); CopyBtn(m.text) }
             }
         }
+    }
+}
+
+/** Small copy button under a message: one tap puts the whole message on the clipboard, the icon turns into a tick for a moment. */
+@Composable
+private fun CopyBtn(text: String) {
+    if (text.isBlank()) return
+    val clip = LocalClipboardManager.current
+    var done by remember { mutableStateOf(false) }
+    LaunchedEffect(done) { if (done) { kotlinx.coroutines.delay(1500); done = false } }
+    IconButton({ clip.setText(AnnotatedString(text)); done = true }, Modifier.size(30.dp)) {
+        Icon(if (done) Icons.Filled.Check else Icons.Filled.ContentCopy, stringResource(R.string.copy), Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .8f))
     }
 }
 

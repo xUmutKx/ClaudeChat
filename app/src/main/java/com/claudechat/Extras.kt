@@ -84,7 +84,7 @@ private fun PulseDot(c: Color) {
 
 // ---------------------------------------------------------------- customize (tap the header mascot)
 
-val CHAT_BGS = listOf("none", "dusk", "mint", "rose", "sand", "grid", "stars")
+val CHAT_BGS = listOf("none", "dusk", "mint", "rose", "sand", "grid", "stars", "dots", "ocean", "sunset", "lavender", "slate", "forest", "peach", "midnight", "graphite")
 
 /** Chat-screen-only background; drawn behind the messages, never on the other screens. */
 @Composable
@@ -96,6 +96,18 @@ fun ChatBackground(modifier: Modifier = Modifier) {
         "mint" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF0F2A25), Color(0xFF0A1715)) else listOf(Color(0xFFD9F5EA), Color(0xFFF1FBF6)))))
         "rose" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF2E1520), Color(0xFF170A10)) else listOf(Color(0xFFFFE0E8), Color(0xFFFFF4F1)))))
         "sand" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF2A2218), Color(0xFF16120B)) else listOf(Color(0xFFF3E7D3), Color(0xFFFBF5EA)))))
+        "ocean" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF0E2A3F), Color(0xFF081821)) else listOf(Color(0xFFD4ECFA), Color(0xFFEEF8FD)))))
+        "sunset" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF3A1B2A), Color(0xFF1A0E14)) else listOf(Color(0xFFFFD9C2), Color(0xFFFFEFE6)))))
+        "lavender" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF24193A), Color(0xFF120D1E)) else listOf(Color(0xFFE9DEFA), Color(0xFFF7F2FD)))))
+        "slate" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF1E252B), Color(0xFF0F1316)) else listOf(Color(0xFFDDE4EA), Color(0xFFF3F6F8)))))
+        "forest" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF12281A), Color(0xFF09130D)) else listOf(Color(0xFFD3EBD6), Color(0xFFEEF8EF)))))
+        "peach" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF33211A), Color(0xFF190F0B)) else listOf(Color(0xFFFFE2CF), Color(0xFFFFF3EA)))))
+        "midnight" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF0A0F24), Color(0xFF04060F)) else listOf(Color(0xFFD6DCF5), Color(0xFFEDF0FB)))))
+        "graphite" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF1C1C1E), Color(0xFF0B0B0C)) else listOf(Color(0xFFE5E5E7), Color(0xFFF6F6F7)))))
+        "dots" -> Canvas(modifier) {
+            val step = 22.dp.toPx(); val col = (if (dark) Color.White else Color.Black).copy(alpha = .07f)
+            var y = step / 2; while (y < size.height) { var x = step / 2; while (x < size.width) { drawCircle(col, 1.6.dp.toPx(), Offset(x, y)); x += step }; y += step }
+        }
         "grid" -> Canvas(modifier) {
             val step = 28.dp.toPx(); val c = (if (dark) Color.White else Color.Black).copy(alpha = .05f)
             var x = 0f; while (x < size.width) { drawLine(c, Offset(x, 0f), Offset(x, size.height)); x += step }
@@ -172,7 +184,7 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
             Label(tr("Pill colour", "Pill rengi"))
             Chips(listOf("black" to tr("Black", "Siyah"), "white" to tr("White", "Beyaz")), pill) { Prefs.pillColor.value = it }
             Label(tr("Chat background (main chat screen only)", "Sohbet arka planı (yalnızca ana sohbet ekranı)"))
-            Chips(listOf("none" to tr("None", "Yok"), "dusk" to tr("Dusk", "Alacakaranlık"), "mint" to tr("Mint", "Nane"), "rose" to tr("Rose", "Gül"), "sand" to tr("Sand", "Kum"), "grid" to tr("Grid", "Izgara"), "stars" to tr("Stars", "Yıldızlar")), bg) { Prefs.chatBg.value = it }
+            Chips(listOf("none" to tr("None", "Yok"), "dusk" to tr("Dusk", "Alacakaranlık"), "mint" to tr("Mint", "Nane"), "rose" to tr("Rose", "Gül"), "sand" to tr("Sand", "Kum"), "grid" to tr("Grid", "Izgara"), "stars" to tr("Stars", "Yıldızlar"), "dots" to tr("Dots", "Noktalar"), "ocean" to tr("Ocean", "Okyanus"), "sunset" to tr("Sunset", "Gün batımı"), "lavender" to tr("Lavender", "Lavanta"), "slate" to tr("Slate", "Arduvaz"), "forest" to tr("Forest", "Orman"), "peach" to tr("Peach", "Şeftali"), "midnight" to tr("Midnight", "Gece yarısı"), "graphite" to tr("Graphite", "Grafit")), bg) { Prefs.chatBg.value = it }
             Label(tr("Message bubbles", "Mesaj balonları"))
             Chips(listOf("soft" to tr("Soft", "Yumuşak"), "round" to tr("Round", "Yuvarlak"), "square" to tr("Square", "Köşeli"), "outline" to tr("Outline", "Çerçeve")), bubble) { Prefs.bubbleStyle.value = it }
         }

@@ -300,7 +300,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                     Text("${(u * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
                 }
                 LinearProgressIndicator({ u }, Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)))
-                if (reset > 0) Hint(stringResource(R.string.lim_reset, java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(reset * 1000))))
+                if (reset > 0) Hint(stringResource(R.string.lim_reset, java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(reset * 1000))))
                 Spacer(Modifier.height(6.dp))
             }
         }

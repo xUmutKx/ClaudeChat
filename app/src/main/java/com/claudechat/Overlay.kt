@@ -64,6 +64,8 @@ class Overlay(base: Context) {
     private var iconBox: View? = null
     private var pillVertical = false
     private var pillSide = 0
+    private var mascotK = 1f                      // how far (in side-widths) the mascot slides while the pill opens; sign = direction
+    private var iconK = -1f
     private var ringFrac = 0.3f
     private var evProg = 1f                       // event pill: 0 = just the camera ring, 1 = fully open
     private var evAnim: ValueAnimator? = null
@@ -99,13 +101,7 @@ class Overlay(base: Context) {
     }
 
     private fun mascotDrawableBase(sleep: Boolean, computer: Boolean = false, alt: Boolean = false): android.graphics.drawable.Drawable {
-        val hat = when (Prefs.pillOutfit.value) {
-            "wizard" -> R.drawable.ic_hat_wizard
-            "crown" -> R.drawable.ic_hat_crown
-            "party" -> R.drawable.ic_hat_party
-            "bow" -> R.drawable.ic_hat_bow
-            else -> 0
-        }
+        val hat = Outfit.hat()
         val skin = Outfit.skinMatrix()
         fun d(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate().also { if (skin != null) it.colorFilter = android.graphics.ColorMatrixColorFilter(skin) }
         fun h(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate()
@@ -261,15 +257,21 @@ class Overlay(base: Context) {
     }
 
     /** The pill's background: a capsule that can be drawn narrower than its bounds (centred), so it can grow out of the camera. */
-    private class Capsule(var fill: Int, var stroke: Int, val strokePx: Float) : android.graphics.drawable.Drawable() {
+    private class Capsule(var fill: Int, var stroke: Int, val strokePx: Float, val vertical: Boolean = false, val anchor: Float = 0.5f) : android.graphics.drawable.Drawable() {
         var frac = 1f
         var fillMul = 1f
         private var a = 255
         private val p = Paint(Paint.ANTI_ALIAS_FLAG)
         override fun draw(c: Canvas) {
             val b = bounds
-            val w = b.width() * frac; val cx = b.exactCenterX(); val r = b.height() / 2f
-            val rect = RectF(cx - w / 2f, b.top.toFloat(), cx + w / 2f, b.bottom.toFloat())
+            val rect: RectF; val r: Float
+            if (vertical) {
+                val h = b.height() * frac; val top = b.top + (b.height() - h) * anchor
+                rect = RectF(b.left.toFloat(), top, b.right.toFloat(), top + h); r = b.width() / 2f
+            } else {
+                val w = b.width() * frac; val left = b.left + (b.width() - w) * anchor
+                rect = RectF(left, b.top.toFloat(), left + w, b.bottom.toFloat()); r = b.height() / 2f
+            }
             p.style = Paint.Style.FILL; p.color = fill; p.alpha = (a * fillMul).toInt()
             c.drawRoundRect(rect, r, r, p)
             if (strokePx > 0f) {
@@ -318,8 +320,8 @@ class Overlay(base: Context) {
         capsule?.let { it.frac = ringFrac + (1f - ringFrac) * q; it.fillMul = ((Prefs.pillBg.value.toIntOrNull() ?: 100).coerceIn(0, 100)) / 100f; it.alpha = (255 * ringA * all).toInt(); it.invalidateSelf() }
         val sideA = ((q - 0.35f) / 0.65f).coerceIn(0f, 1f)
         val sc = 0.7f + 0.3f * sideA
-        mascot?.let { it.alpha = sideA * all; it.scaleX = sc; it.scaleY = sc; if (!pillVertical) it.translationX = (1f - q) * pillSide * 0.9f }
-        iconBox?.let { it.alpha = sideA * all; it.scaleX = sc; it.scaleY = sc; if (!pillVertical) it.translationX = -(1f - q) * pillSide * 0.9f }
+        mascot?.let { it.alpha = sideA * all; it.scaleX = sc; it.scaleY = sc; if (!pillVertical) it.translationX = (1f - q) * pillSide * 0.9f * mascotK }
+        iconBox?.let { it.alpha = sideA * all; it.scaleX = sc; it.scaleY = sc; if (!pillVertical) it.translationX = (1f - q) * pillSide * 0.9f * iconK }
         root?.invalidate()
     }
 
@@ -571,7 +573,14 @@ class Overlay(base: Context) {
                 val ringLen = (if (vertical) cut.height() else cut.width()) + 2 * rim + dp(6)
                 val extra = (Prefs.pillExtra.value.toIntOrNull() ?: 5).coerceIn(0, 24) // px added to each end; more reach = more status icons covered
                 val side = dp(40) + extra
-                val cap = Capsule(if (Prefs.pillColor.value == "white") Color.WHITE else Color.BLACK, Color.TRANSPARENT, dp(2).toFloat())
+                // room on both sides of the camera along the edge: centred pill if both fit; a camera near a corner grows the pill one way, away from the edge
+                val along = if (vertical) cut.centerY() else cut.centerX()
+                val span = if (vertical) screenHeight() else screenWidth()
+                val roomA = along - ringLen / 2; val roomB = span - along - ringLen / 2
+                val mode = when { roomA >= side && roomB >= side -> 0; roomA < side && roomB >= 2 * side -> 1; roomB < side && roomA >= 2 * side -> 2; else -> 0 }
+                mascotK = when (mode) { 1 -> -1f; 2 -> 2f; else -> 1f }
+                iconK = when (mode) { 1 -> -2f; 2 -> 1f; else -> -1f }
+                val cap = Capsule(if (Prefs.pillColor.value == "white") Color.WHITE else Color.BLACK, Color.TRANSPARENT, dp(2).toFloat(), vertical, when (mode) { 1 -> 0f; 2 -> 1f; else -> 0.5f })
                 capsule = cap
                 val box = LinearLayout(ctx).apply {
                     orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
@@ -580,9 +589,10 @@ class Overlay(base: Context) {
                 }
                 fun lp(len: Int) = if (vertical) LinearLayout.LayoutParams(thick, len) else LinearLayout.LayoutParams(len, thick)
                 mascot = ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot); setPadding(dp(8), dp(3), dp(4), dp(3)) }
-                box.addView(mascot, lp(side))
                 ring = RingView(ctx) // thin ring around the camera hole (spinner while working)
-                box.addView(ring, lp(ringLen))
+                if (mode == 1) box.addView(ring, lp(ringLen))
+                box.addView(mascot, lp(side))
+                if (mode == 0) box.addView(ring, lp(ringLen))
                 val icon = FrameLayout(ctx)
                 spinner = ProgressBar(ctx).apply { isIndeterminate = true }
                 mark = TextView(ctx).apply { textSize = 15f; gravity = Gravity.CENTER; setTypeface(typeface, android.graphics.Typeface.BOLD) }
@@ -594,6 +604,7 @@ class Overlay(base: Context) {
                 }
                 icon.addView(term, FrameLayout.LayoutParams(dp(30), dp(20), Gravity.CENTER))
                 box.addView(icon, lp(side))
+                if (mode == 2) box.addView(ring, lp(ringLen))
                 iconBox = icon; pillVertical = vertical; pillSide = side
                 ringFrac = ringLen.toFloat() / (2 * side + ringLen)
                 label = TextView(ctx) // off-screen: the pill is a single strip
@@ -610,8 +621,9 @@ class Overlay(base: Context) {
                 val flags = base or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 wm.addView(box, params(-2, -2, flags, Gravity.TOP or Gravity.START, 0).also {
                     // absolute position so the middle segment lands exactly on the camera, whatever the edge
-                    if (vertical) { it.x = (cut.left - rim + trim).coerceAtLeast(0); it.y = (cut.centerY() - total / 2).coerceAtLeast(0) }
-                    else { it.x = (cut.centerX() - total / 2).coerceAtLeast(0); it.y = (cut.top - rim + trim).coerceAtLeast(0) }
+                    val start = when (mode) { 1 -> along - ringLen / 2; 2 -> along + ringLen / 2 - total; else -> along - total / 2 }.coerceIn(0, maxOf(0, span - total))
+                    if (vertical) { it.x = (cut.left - rim + trim).coerceAtLeast(0); it.y = start }
+                    else { it.x = start; it.y = (cut.top - rim + trim).coerceAtLeast(0) }
                     if (Build.VERSION.SDK_INT >= 30) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                     else if (Build.VERSION.SDK_INT >= 28) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 })
