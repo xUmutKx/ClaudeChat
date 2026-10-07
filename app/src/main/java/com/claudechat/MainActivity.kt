@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        if (Prefs.keepAlive.value || Prefs.overlay.value != "off") KeepAliveService.start(this)
+        if (Prefs.keepAlive.value || Prefs.overlay.value != "off" || Vib.anyBuild()) KeepAliveService.start(this)
         setContent {
             ClaudeTheme {
                 val dark = isDarkTheme()
@@ -35,14 +35,15 @@ class MainActivity : ComponentActivity() {
                     enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
                 }
                 var screen by rememberSaveable { mutableStateOf("chat") }
-                BackHandler(screen != "chat") { screen = if (screen == "guide" || screen == "setup") "settings" else "chat" }
+                BackHandler(screen != "chat") { screen = if (screen == "guide" || screen == "setup" || screen == "tasks") "settings" else "chat" }
                 Crossfade(screen, label = "screen") {
                     when (it) {
-                        "settings" -> SettingsScreen({ screen = "chat" }, { screen = "guide" }, { recreate() }, { screen = "setup" })
+                        "settings" -> SettingsScreen({ screen = "chat" }, { screen = "guide" }, { recreate() }, { screen = "setup" }, { screen = "tasks" })
                         "guide" -> GuideScreen { screen = "settings" }
                         "setup" -> SetupScreen { screen = "chat" }
+                        "tasks" -> TaskManagerScreen { screen = "settings" }
                         "chats" -> ChatsScreen({ screen = "chat" }, { screen = "chat" })
-                        else -> ChatScreen({ screen = "settings" }, { screen = "chats" }, { screen = "setup" })
+                        else -> ChatScreen({ screen = "settings" }, { screen = "chats" }, { screen = "setup" }, { screen = "tasks" })
                     }
                 }
             }

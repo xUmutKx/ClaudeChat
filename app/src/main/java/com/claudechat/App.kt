@@ -76,7 +76,18 @@ object Prefs {
     lateinit var danceMode: S    // mascot animation: steps (frame by frame) / smooth
     lateinit var pillColor: S   // pill background: black / white
     lateinit var pillGap: S      // extra room around the camera ring, dp (0..8)
+    lateinit var showHeaderMascot: S // "1"/"0": mascot at the top left of the chat screen
+    lateinit var showNotifMascot: S  // "1"/"0": mascot inside the keep-alive notification
+    lateinit var mascotScene: S      // background scene behind the mascot: none / beach / forest / home / library / cave / sea / plane
+    lateinit var sceneDim: S         // percent of black drawn over the scene (behind the mascot), 0..90
+    lateinit var pillEvents: S       // "1": the pill only appears when something changes
+    lateinit var pillBg: S           // pill background opacity, percent (0..100)
+    lateinit var pillAlpha: S        // whole pill opacity, percent (10..100)
+    lateinit var pillHold: S         // seconds the event pill stays open (1..15)
+    lateinit var sceneInPill: S      // "1": the chosen scene is also drawn behind the mascot in the pill
     lateinit var pillOutfit: S   // mascot outfit: none / wizard / crown / party / bow
+    lateinit var pillSleepHide: S // seconds after finishing until the sleeping pill hides itself (0 = never, slider 10..600)
+    lateinit var pillExtra: S    // extra pill length at each end, px
     lateinit var mascotSkin: S   // body colour: orange / red / pink / purple / blue / teal / green / yellow / gray
     lateinit var bubbleX: S      // floating bubble position, px
     lateinit var bubbleY: S
@@ -85,6 +96,7 @@ object Prefs {
     lateinit var dynamic: B
     lateinit var keepAlive: B
     lateinit var autoStart: B
+    lateinit var chatNotes: B
     lateinit var screenOn: B    // keep the screen on while the curtain is showing
 
     fun init(c: Context) {
@@ -118,7 +130,18 @@ object Prefs {
         danceMode = S("danceMode", "steps")
         pillColor = S("pillColor", "black")
         pillGap = S("pillGap", "1")
+        showHeaderMascot = S("showHeaderMascot", "1")
+        showNotifMascot = S("showNotifMascot", "1")
+        mascotScene = S("mascotScene", "none")
+        sceneDim = S("sceneDim", "35")
+        pillEvents = S("pillEvents", "0")
+        pillHold = S("pillHold", "4")
+        pillBg = S("pillBg", "100")
+        pillAlpha = S("pillAlpha", "100")
+        sceneInPill = S("sceneInPill", "0")
         pillOutfit = S("pillOutfit", "none")
+        pillSleepHide = S("pillSleepSecs", "120")
+        pillExtra = S("pillExtra", "5")
         mascotSkin = S("mascotSkin", "orange")
         bubbleX = S("bubbleX", "")
         bubbleY = S("bubbleY", "")
@@ -127,6 +150,7 @@ object Prefs {
         dynamic = B("dynamic", false)
         keepAlive = B("keepAlive", true)
         autoStart = B("autoStart", true)
+        chatNotes = B("chatNotes", true)
         screenOn = B("screenOn", true)
         if (token.value.isEmpty()) token.value = randomToken()
     }

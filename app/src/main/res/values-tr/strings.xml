@@ -99,6 +99,8 @@
     <string name="token">Anahtar</string>
     <string name="regenerate">Yeni</string>
     <string name="auto_start">Köprüyü otomatik başlat</string>
+    <string name="chat_notes">Eski sohbetleri hatırla</string>
+    <string name="chat_notes_sub">Yeni sohbetlere son sohbetlerin kısa notları eklenir (tam metin değil)</string>
 
     <string name="sec_termux">Termux bağlantısı</string>
     <string name="termux_installed">Termux kurulu.</string>
@@ -246,4 +248,5 @@
     <string name="po_ears">Kedi kulağı</string>
     <string name="po_shades">Gözlük</string>
     <string name="po_santa">Noel şapkası</string>
+    <string name="err_dropped">Köprüyle bağlantı koptu. Claude hâlâ çalışıyor olabilir; sohbeti yeniden aç ya da Bağlan\'a bas.</string>
 </resources>

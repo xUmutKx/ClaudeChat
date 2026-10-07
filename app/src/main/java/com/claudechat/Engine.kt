@@ -44,6 +44,9 @@ private class Run(val id: String) {
     val cost = MutableStateFlow(0.0)   // accumulated cost of this chat, USD
     val agents = MutableStateFlow<List<AgentInfo>>(emptyList())
     val shell = MutableStateFlow(false) // a Bash command is running right now
+    @Volatile var since = 0L       // when the running turn started (task manager)
+    @Volatile var tool = ""        // tool the turn is in right now
+    @Volatile var cmd = ""         // the Bash command line, while one runs
     var nextId = 1L
     var job: Job? = null
     @Volatile var call: Call? = null
@@ -91,6 +94,26 @@ object Engine {
 
     /** "Show me the blue shell state": the header, pill and bubble pretend a command runs for a few seconds (customize sheet preview). */
     val demoShell = MutableStateFlow(false)
+    /** Multi-agent test: three fake agents appear above the composer, make progress and finish (about 15 s). A real turn clears them. */
+    fun previewAgents() {
+        val r = chatRun(currentId.value.ifEmpty { return })
+        uiScope.launch {
+            r.agents.value = listOf(
+                AgentInfo("demo1", tr0("Read the project files", "Proje dosyalarını oku"), "Explore", tr0("Searching *.kt", "*.kt aranıyor")),
+                AgentInfo("demo2", tr0("Check the build setup", "Derleme ayarlarını kontrol et"), "general-purpose", tr0("Reading build.gradle.kts", "build.gradle.kts okunuyor")),
+                AgentInfo("demo3", tr0("Write a short summary", "Kısa bir özet yaz"), "Plan", tr0("Waiting", "Bekliyor")),
+            )
+            val steps = listOf(
+                Triple("demo1", tr0("Reading Chat.kt", "Chat.kt okunuyor"), 3), Triple("demo2", tr0("Running gradle tasks", "gradle görevleri çalışıyor"), 2),
+                Triple("demo3", tr0("Drafting the answer", "Cevap taslağı yazılıyor"), 1), Triple("demo1", tr0("Found 12 files", "12 dosya bulundu"), 6), Triple("demo2", tr0("Build looks fine", "Derleme sorunsuz"), 5),
+            )
+            for ((id, act, n) in steps) { delay(2200); r.agents.value = r.agents.value.map { if (it.id == id) it.copy(activity = act, tools = n) else it } }
+            for (id in listOf("demo1", "demo2", "demo3")) { delay(1400); r.agents.value = r.agents.value.map { if (it.id == id) it.copy(done = true) else it } }
+            delay(4000); r.agents.value = r.agents.value.filter { !it.id.startsWith("demo") }
+        }
+    }
+    private fun tr0(en: String, trText: String) = if (Prefs.lang.value == "tr") trText else en
+
     fun previewShell() { demoShell.value = true; uiScope.launch { delay(10_000); demoShell.value = false } }
 
     private fun msgFile(id: String) = File(dir, "$id.json")
@@ -229,21 +252,27 @@ object Engine {
 
     private fun firstLine(shown: String) = shown.lineSequence().first().take(48)
 
-    fun send(text: String, atts: List<Att> = emptyList()) {
+    /** [reply]: the earlier message (author, text) the user swiped to answer; Claude is told which one. */
+    fun send(text: String, atts: List<Att> = emptyList(), reply: Pair<Role, String>? = null) {
         val t = text.trim()
         if (t.isEmpty() && atts.isEmpty()) return
         val r = chatRun(currentId.value)
-        val shown = (t + "\n" + atts.joinToString("\n") { "📎 ${it.name}" }).trim()
-        val prompt = if (atts.isEmpty()) t else
+        val quote = reply?.second?.trim().orEmpty()
+        val shownQuote = if (quote.isEmpty()) "" else "↩ " + quote.lineSequence().filter { it.isNotBlank() }.joinToString(" ").take(160) + "\n\n"
+        val shown = (shownQuote + t + "\n" + atts.joinToString("\n") { "📎 ${it.name}" }).trim()
+        val who = if (reply?.first == Role.Claude) "you (Claude)" else "the user"
+        val head = if (quote.isEmpty()) "" else "[The user is replying to this earlier message from $who. Answer about that message specifically:\n\"${quote.take(1500)}\"]\n\n"
+        val prompt = head + if (atts.isEmpty()) t else
             (t.ifEmpty { "Please look at the attached file(s)." } + "\n\n[Attached files, read them as needed]\n" + atts.joinToString("\n") { it.path })
         if (chats.value.firstOrNull { it.id == r.id }?.title.isNullOrEmpty())
-            updateChat(r.id) { it.copy(title = firstLine(shown)) }
+            updateChat(r.id) { it.copy(title = firstLine((t + "\n" + atts.joinToString("\n") { a -> "📎 ${a.name}" }).trim().ifEmpty { shown })) }
         add(r, Role.User, shown); save(r)
         if (r.status.value == Status.Working) { r.pending.add(prompt); return }
         start(r, prompt)
     }
 
     private fun start(r: Run, prompt: String) {
+        r.since = System.currentTimeMillis(); r.tool = ""; r.cmd = ""
         setStatus(r, Status.Working)
         KeepAliveService.start(App.ctx)
         r.job = scope.launch { execute(r, prompt) }
@@ -256,6 +285,44 @@ object Engine {
 
     /** Stops the chat on screen; other chats keep running. */
     fun stop() = runs[currentId.value]?.let { stopRun(it) } ?: Unit
+
+    /** Stops one running chat by id (task manager). */
+    fun stopChat(id: String) { runs[id]?.let { stopRun(it) } }
+
+    /** Everything that is running right now: one entry per working chat. */
+    fun tasks(): List<TaskInfo> = runs.values.filter { it.status.value == Status.Working }.map { r ->
+        TaskInfo(r.id, chats.value.firstOrNull { it.id == r.id }?.title.orEmpty(), r.since, r.tool, if (r.shell.value) r.cmd else "",
+            r.agents.value.size, r.agents.value.count { it.done }, r.pending.size)
+    }.sortedBy { it.since }
+
+    /** The claude processes the bridge keeps alive (one per chat). */
+    fun bridgeProcs(): List<BridgeProc>? = try {
+        http.newBuilder().callTimeout(3, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/ps")).header("X-Token", Termux.cleanToken()).build()).execute().use { resp ->
+            if (!resp.isSuccessful) emptyList() else {
+                val a = JSONObject(resp.body!!.string()).getJSONArray("procs")
+                (0 until a.length()).map { val o = a.getJSONObject(it); BridgeProc(o.getString("chat"), o.optInt("pid"), o.optBoolean("busy"), o.optInt("idle")) }
+            }
+        }
+    } catch (e: Exception) { emptyList() }
+
+    /** Newest Gradle build log the bridge can find: file, seconds since its last write, and its tail. */
+    @Volatile var buildAlive = false
+    fun buildLog(): Triple<String, Int, String>? = try {
+        http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/build")).header("X-Token", Termux.cleanToken()).build()).execute().use { resp ->
+            if (!resp.isSuccessful) null else JSONObject(resp.body!!.string()).let { o -> buildAlive = o.optBoolean("alive"); if (o.optString("file").isEmpty()) null else Triple(o.getString("file"), o.optInt("age"), o.optString("text")) }
+        }
+    } catch (e: Exception) { null }
+
+    /** Ends the bridge's claude process of a chat (it is started again on the next message). */
+    fun killProc(chat: String) {
+        scope.launch {
+            try {
+                http.newBuilder().callTimeout(3, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/kill")).header("X-Token", Termux.cleanToken())
+                    .post(JSONObject().put("chat", chat).toString().toRequestBody("application/json".toMediaType())).build()).execute().close()
+            } catch (_: Exception) { }
+            stopChat(chat)
+        }
+    }
 
     /** Stops every running chat (notification's stop button). */
     fun stopAll() { runs.values.forEach { stopRun(it) } }
@@ -356,13 +423,31 @@ object Engine {
             throw e
         } catch (e: Exception) {
             if (!currentCoroutineContext().isActive) return
+            // the answer already arrived (or the user pressed stop): a late socket/stream error is not worth showing
+            if (r.gotResult || !r.status.value.running) return
+            if (e is IOException && e !is ConnectException) {
+                fail(r, appStr(R.string.err_dropped), Status.Offline); return
+            }
             if (e is ConnectException) fail(r, appStr(R.string.err_offline, Prefs.port.value), Status.Offline)
             else fail(r, e.message ?: e.javaClass.simpleName)
         }
     }
 
+    /** Short notes on the latest other chats (title, first question, last answer) so a fresh session knows the context without replaying history. */
+    private fun oldChatNotes(id: String): String {
+        val sb = StringBuilder()
+        chats.value.filter { it.id != id && it.title.isNotEmpty() }.sortedByDescending { it.updated }.take(6).forEach { c ->
+            val m = readMsgs(c.id)
+            val q = m.firstOrNull { it.role == Role.User }?.text.orEmpty().replace('\n', ' ').take(100)
+            val a = m.lastOrNull { it.role == Role.Claude }?.text.orEmpty().replace('\n', ' ').take(160)
+            sb.append("- ").append(c.title).append(" | Q: ").append(q).append(" | A: ").append(a).append('\n')
+        }
+        return if (sb.isEmpty()) "" else "[Notes on earlier chats, for context only; do not mention unless relevant]\n$sb[End of notes]\n\n"
+    }
+
     private suspend fun stream(r: Run, prompt: String, canRetry: Boolean) {
-        val body = JSONObject().put("prompt", prompt).put("chat", r.id).put("cwd", Prefs.cwd.value).put("mode", Prefs.mode.value).put("addDir", Prefs.attachDir.value).put("model", Prefs.model.value).put("effort", Prefs.effort.value)
+        val notes = if (Prefs.chatNotes.value && sessionOf(r.id).isEmpty() && r.messages.value.count { it.role == Role.User } <= 1) oldChatNotes(r.id) else ""
+        val body = JSONObject().put("prompt", notes + prompt).put("chat", r.id).put("cwd", Prefs.cwd.value).put("mode", Prefs.mode.value).put("addDir", Prefs.attachDir.value).put("model", Prefs.model.value).put("effort", Prefs.effort.value)
         val sess = sessionOf(r.id)
         if (sess.isNotEmpty()) body.put("session", sess)
         val req = Request.Builder().url(url("/chat")).header("X-Token", Termux.cleanToken())
@@ -375,7 +460,8 @@ object Engine {
             val src = resp.body!!.source()
             while (currentCoroutineContext().isActive) {
                 val line = src.readUtf8Line() ?: break
-                if (line.isNotBlank() && handle(r, line, canRetry)) { retry = true }
+                // a single odd line must never abort the turn (JSONException used to surface as a raw error)
+                if (line.isNotBlank() && try { handle(r, line, canRetry) } catch (e: org.json.JSONException) { false }) { retry = true }
             }
         }
         if (retry) {
@@ -400,7 +486,7 @@ object Engine {
                 when (e.optString("type")) {
                     "message_start" -> { r.curId = null; r.streamed = false }
                     "content_block_start" -> when (e.optJSONObject("content_block")?.optString("type")) {
-                        "tool_use" -> { val n = e.getJSONObject("content_block").optString("name"); r.shell.value = n == "Bash"; setDetail(r, appStr(R.string.using_tool, n)) }
+                        "tool_use" -> { val n = e.getJSONObject("content_block").optString("name"); r.shell.value = n == "Bash"; r.tool = n; if (n != "Bash") r.cmd = ""; setDetail(r, appStr(R.string.using_tool, n)) }
                         "thinking" -> { r.shell.value = false; setDetail(r, appStr(R.string.thinking)) }
                         "text" -> { r.shell.value = false; setDetail(r, appStr(R.string.writing)) }
                     }
@@ -423,7 +509,8 @@ object Engine {
                                 val title = inp?.optString("description").orEmpty().ifBlank { inp?.optString("prompt").orEmpty().lineSequence().firstOrNull().orEmpty() }.take(80).ifBlank { name }
                                 r.agents.value = r.agents.value + AgentInfo(b.optString("id"), title, inp?.optString("subagent_type").orEmpty().ifBlank { "agent" })
                             }
-                            r.shell.value = name == "Bash"
+                            r.shell.value = name == "Bash"; r.tool = name
+                            r.cmd = if (name == "Bash") inp?.optString("command").orEmpty().lineSequence().firstOrNull().orEmpty().take(300) else ""
                             add(r, Role.Tool, toolSummary(name, inp), detail = toolDetail(inp))
                             setDetail(r, appStr(R.string.using_tool, name))
                         }
@@ -527,7 +614,7 @@ object Engine {
         save(r)
         // the island/overlay already shows "done"; a second notification would just duplicate it
         if (!appVisible && Prefs.overlay.value == "off") Notifier.done(App.ctx, false, r.messages.value.lastOrNull { it.role == Role.Claude }?.text.orEmpty())
-        if (st == Status.Done) retitle(r)
+        if (st == Status.Done) { Vib.event("done"); retitle(r) }
         drain(r)
     }
 
@@ -536,6 +623,7 @@ object Engine {
         add(r, Role.Error, text, action)
         setStatus(r, st)
         save(r)
+        Vib.event("error")
         if (!appVisible) Notifier.done(App.ctx, true, text)
     }
 

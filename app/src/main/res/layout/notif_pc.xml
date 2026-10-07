@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="horizontal" android:gravity="center_vertical">
+    <!-- at the laptop: two frames (arms up / down, screen glow brighter / dimmer) like the pill, so the typing moves -->
+    <ViewFlipper android:id="@+id/dancer" android:layout_width="56dp" android:layout_height="56dp" android:autoStart="true" android:flipInterval="420">
+        <FrameLayout android:layout_width="56dp" android:layout_height="56dp">
+            <ImageView android:id="@+id/m1" android:layout_width="48dp" android:layout_height="43dp" android:layout_gravity="center" android:src="@drawable/ic_mascot_pc" android:scaleType="fitCenter" />
+            <ImageView android:id="@+id/h1" android:layout_width="48dp" android:layout_height="43dp" android:layout_gravity="center" android:visibility="gone" android:scaleType="fitCenter" />
+        </FrameLayout>
+        <FrameLayout android:layout_width="56dp" android:layout_height="56dp">
+            <ImageView android:id="@+id/m2" android:layout_width="48dp" android:layout_height="43dp" android:layout_gravity="center" android:src="@drawable/ic_mascot_pc2" android:scaleType="fitCenter" />
+            <ImageView android:id="@+id/h2" android:layout_width="48dp" android:layout_height="43dp" android:layout_gravity="center" android:visibility="gone" android:scaleType="fitCenter" />
+        </FrameLayout>
+    </ViewFlipper>
+    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+        android:orientation="vertical" android:paddingStart="8dp">
+        <TextView android:id="@+id/ntitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textStyle="bold" android:textSize="14sp" android:maxLines="1" />
+        <TextView android:id="@+id/ntext" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="13sp" android:maxLines="1" />
+    </LinearLayout>
+</LinearLayout>

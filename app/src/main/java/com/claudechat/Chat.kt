@@ -28,8 +28,13 @@ import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.ui.Alignment
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -74,7 +79,7 @@ fun statusText(s: Status, det: String) = when (s) {
 val Draft = mutableStateOf("")
 
 @Composable
-fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit = {}) {
+fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit = {}, onTasks: () -> Unit = {}) {
     val msgs by Engine.messages.collectAsState()
     val st by Engine.status.collectAsState()
     val det by Engine.detail.collectAsState()
@@ -90,6 +95,7 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit 
     val chats by Engine.chats.collectAsState()
     val curId by Engine.currentId.collectAsState()
     val title = chats.firstOrNull { it.id == curId }?.title.orEmpty()
+    var replyTo by remember { mutableStateOf<Msg?>(null) }
     var sheet by remember { mutableStateOf(false) }
     var custom by remember { mutableStateOf(false) }
     val realShell by Engine.shell.collectAsState()
@@ -104,7 +110,7 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit 
         // this chat looks finished but another chat still works in the background: say so (blue) instead of "Done"
         val overall by Engine.overall.collectAsState()
         val shownSt = if (st != Status.Working && overall == Status.Background) Status.Background else st
-        TopBar(title, shownSt, if (shownSt == Status.Background) Engine.overallDetail.collectAsState().value else det, model.ifEmpty { shortModel(modelSeen) }, { sheet = true }, onChats, onSettings, shell) { custom = true }
+        TopBar(title, shownSt, if (shownSt == Status.Background) Engine.overallDetail.collectAsState().value else det, model.ifEmpty { shortModel(modelSeen) }, { sheet = true }, onChats, onSettings, shell, onTasks) { custom = true }
         if (sheet) OptionsSheet { sheet = false }
         if (custom) CustomizeSheet { custom = false }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -120,32 +126,62 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit 
                     val m = g.first()
                     val next = items.getOrNull(items.size - 1 - ri + 1)?.first()
                     val lastInGroup = next == null || next.role != m.role
-                    if (m.role == Role.Tool) ToolGroup(g) else Message(m, lastInGroup, onSettings)
+                    if (m.role == Role.Tool) ToolGroup(g) else Message(m, lastInGroup, onSettings) { replyTo = it }
                 }
             }
         }
         AgentsBar()
         if (slash.isNotEmpty()) Palette(slash) { input = "/${it.name} " }
+        replyTo?.let { r ->
+            val cs = MaterialTheme.colorScheme
+            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp).clip(RoundedCornerShape(12.dp)).background(cs.surfaceContainerHigh).height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(4.dp).fillMaxHeight().background(cs.primary))
+                Column(Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    Text(if (r.role == Role.Claude) "Claude" else tr("You", "Sen"), fontSize = 12.sp, color = cs.primary, fontWeight = FontWeight.Medium)
+                    Text(r.text.lineSequence().filter { it.isNotBlank() }.joinToString(" "), fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton({ replyTo = null }, Modifier.size(36.dp)) { Icon(Icons.Filled.Close, stringResource(R.string.remove), Modifier.size(18.dp)) }
+            }
+        }
         if (atts.isNotEmpty()) LazyRow(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(atts.toList(), key = { it.uri.toString() }) { a -> AttChip(a) { atts.remove(a) } }
         }
+        BuildBar(onTasks)
         Composer(input, { input = it }, working, atts.isNotEmpty(), { picker.launch("*/*") },
             onSend = {
-                if (!Cmds.runLocal(input.trim(), { sheet = true }, onSettings)) Engine.send(input, atts.toList())
-                input = ""; atts.clear()
+                if (!Cmds.runLocal(input.trim(), { sheet = true }, onSettings)) Engine.send(input, atts.toList(), replyTo?.let { it.role to it.text })
+                input = ""; atts.clear(); replyTo = null
             }, onStop = { Engine.stop() })
     }
 }
 
 @Composable
-private fun TopBar(title: String, st: Status, det: String, model: String, onModel: () -> Unit, onChats: () -> Unit, onSettings: () -> Unit, shell: Boolean, onMascot: () -> Unit) {
+private fun TopBar(title: String, st: Status, det: String, model: String, onModel: () -> Unit, onChats: () -> Unit, onSettings: () -> Unit, shell: Boolean, onTasks: () -> Unit, onMascot: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(52.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest).clickable(onClick = onMascot), contentAlignment = Alignment.Center) {
-                val pc = st == Status.Background || shell
-                Mascot(st.running, Modifier.size(if (pc) 46.dp else 36.dp, if (pc) 28.dp else 26.dp), sleeping = st == Status.Idle, computer = pc)
+            if (Prefs.showHeaderMascot.flow.collectAsState().value == "1") {
+                // the same coloured loading ring as around the camera (the pill is hidden while the chat is open)
+                val ringColor = if (shell) Color(0xFF2196F3) else statusColor(st)
+                val spin by rememberInfiniteTransition(label = "hring").animateFloat(0f, 360f, infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "hr")
+                Box(Modifier.size(66.dp), contentAlignment = Alignment.Center) {
+                if (st != Status.Idle) androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                    val w = 3.dp.toPx(); val inset = w / 2f
+                    val arcSize = androidx.compose.ui.geometry.Size(size.width - w, size.height - w)
+                    val tl = androidx.compose.ui.geometry.Offset(inset, inset)
+                    drawArc(ringColor.copy(alpha = .25f), 0f, 360f, false, tl, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(w))
+                    if (st.running) drawArc(ringColor, spin - 90f, 100f, false, tl, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(w, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                    else drawArc(ringColor, 0f, 360f, false, tl, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(w))
+                }
+                Box(Modifier.size(56.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest).clickable(onClick = onMascot), contentAlignment = Alignment.Center) {
+                    val sc = Outfit.scene(Prefs.mascotScene.flow.collectAsState().value)
+                    if (sc != 0) androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(sc), null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                    if (sc != 0) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = (Prefs.sceneDim.flow.collectAsState().value.toIntOrNull() ?: 35) / 100f)))
+                    val pc = st == Status.Background || shell
+                    Mascot(st.running, Modifier.size(48.dp, 35.dp), sleeping = st == Status.Idle, computer = pc)
+                }
+                }
+                Spacer(Modifier.width(8.dp))
             }
-            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(onClick = onModel)) {
                 Text(title.ifEmpty { modelTitle(model) }, fontFamily = FontFamily.Serif, fontSize = 20.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -164,8 +200,8 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
 /** One shared dance for the notification, island, pill, AOD and chat: slow stepped frames, tilts left/right, then straight hops. */
 object Dance {
     const val FRAME_MS = 280L
-    /** 4 frames: straight hop up, tilt left (low), tilt right (up, diagonal), straight down */
-    val ROT = floatArrayOf(0f, -12f, 12f, 0f)
+    /** 4 frames, even on both sides: centre (up), tilt left (low), centre (up), tilt right (low) */
+    val ROT = floatArrayOf(0f, -12f, 0f, 12f)
     /** 0 = down, 1 = up (scaled by each place's hop height) */
     val UP = floatArrayOf(1f, 0f, 1f, 0f)
 }
@@ -176,12 +212,12 @@ private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean =
     val hat = Outfit.hat(Prefs.pillOutfit.flow.collectAsState().value)
     val skin = Prefs.mascotSkin.flow.collectAsState().value
     val tint = remember(skin) { Outfit.skinMatrix(skin)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
-    if (computer) { // a shell runs: the laptop (with its apple-like logo) stands beside the mascot
-        Box(modifier, contentAlignment = Alignment.Center) {
-            Box(Modifier.aspectRatio(30f / 18f)) {
-                Image(painterResource(R.drawable.ic_mascot_pc), null, Modifier.fillMaxSize(), colorFilter = tint)
-                if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxHeight().aspectRatio(20f / 18f).align(Alignment.CenterStart))
-            }
+    if (computer) { // a shell runs: a small laptop (back cover with an apple-like logo) in front of the mascot, its screen lighting the face green
+        var alt by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(450); alt = !alt } }
+        Box(modifier) {
+            Image(painterResource(if (alt) R.drawable.ic_mascot_pc2 else R.drawable.ic_mascot_pc), null, Modifier.fillMaxSize(), colorFilter = tint)
+            if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxSize())
         }
         return
     }
@@ -199,9 +235,12 @@ fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false, comp
     if (sleeping && !working) { // idle: eyes closed and a drifting "z"
         val t = rememberInfiniteTransition(label = "zzz")
         val a by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "z")
+        val a2 by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400, delayMillis = 700), RepeatMode.Reverse), label = "z2")
         Box(contentAlignment = Alignment.TopEnd) {
             MascotImg(true, modifier)
-            Text("z", Modifier.offset(x = 6.dp, y = (-7).dp).graphicsLayer { alpha = a }, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            // two z's, the second one bigger and half a beat later
+            Text("z", Modifier.offset(x = 3.dp, y = (-4).dp).graphicsLayer { alpha = a }, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            Text("Z", Modifier.offset(x = 10.dp, y = (-10).dp).graphicsLayer { alpha = a2 }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         }
         return
     }
@@ -251,8 +290,33 @@ private fun EmptyState(onSetup: () -> Unit = {}) {
     }
 }
 
+/** Swipe a message to the right to answer it (like in a messenger). */
 @Composable
-private fun Message(m: Msg, lastInGroup: Boolean, onSettings: () -> Unit) {
+private fun SwipeToReply(onReply: () -> Unit, content: @Composable () -> Unit) {
+    val dens = androidx.compose.ui.platform.LocalDensity.current
+    val trigger = with(dens) { 64.dp.toPx() }
+    var dx by remember { mutableStateOf(0f) }
+    var held by remember { mutableStateOf(false) }
+    val shown by animateFloatAsState(if (held) dx else 0f, label = "swipe")
+    Box(Modifier.fillMaxWidth().pointerInput(Unit) {
+        detectHorizontalDragGestures(
+            onDragStart = { held = true; dx = 0f },
+            onDragEnd = { if (dx >= trigger) onReply(); held = false; dx = 0f },
+            onDragCancel = { held = false; dx = 0f },
+        ) { _, d -> dx = (dx + d).coerceIn(0f, trigger * 1.4f) }
+    }) {
+        if (shown > 8f) Icon(Icons.AutoMirrored.Filled.Reply, null, Modifier.align(Alignment.CenterStart).padding(start = 6.dp).size(22.dp).alpha((shown / trigger).coerceIn(0f, 1f)), tint = MaterialTheme.colorScheme.primary)
+        Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(shown.toInt(), 0) }) { content() }
+    }
+}
+
+@Composable
+private fun Message(m: Msg, lastInGroup: Boolean, onSettings: () -> Unit, onReply: (Msg) -> Unit) {
+    if (m.role == Role.User || m.role == Role.Claude) SwipeToReply({ onReply(m) }) { MessageBody(m, lastInGroup, onSettings) } else MessageBody(m, lastInGroup, onSettings)
+}
+
+@Composable
+private fun MessageBody(m: Msg, lastInGroup: Boolean, onSettings: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val maxW = (LocalConfiguration.current.screenWidthDp * 0.86f).dp
     val ctx = LocalContext.current
@@ -275,7 +339,17 @@ private fun Message(m: Msg, lastInGroup: Boolean, onSettings: () -> Unit) {
                         border = if (bs == "outline") BorderStroke(1.dp, cs.outline) else null,
                         modifier = Modifier.widthIn(max = maxW)
                     ) {
-                        Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) { SelectionContainer { MarkdownText(m.text, cs.onSurface) } }
+                        Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                            val quote = if (m.text.startsWith("↩ ")) m.text.removePrefix("↩ ").substringBefore("\n\n") else null
+                            val body = if (quote != null) m.text.substringAfter("\n\n", "") else m.text
+                            Column {
+                                if (quote != null) Row(Modifier.padding(bottom = 6.dp).height(IntrinsicSize.Min)) {
+                                    Box(Modifier.width(3.dp).fillMaxHeight().background(cs.primary))
+                                    Text(quote, Modifier.padding(start = 8.dp), fontSize = 12.sp, color = cs.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (body.isNotBlank() || quote == null) SelectionContainer { MarkdownText(body, cs.onSurface) }
+                            }
+                        }
                     }
                 }
             } else {
@@ -312,16 +386,41 @@ private fun AttChip(a: Att, onRemove: () -> Unit) {
 
 @Composable
 private fun TypingBubble() {
-    val t = rememberInfiniteTransition(label = "typing")
-    Surface(color = Color.Transparent) {
-        Row(Modifier.padding(horizontal = 4.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            repeat(3) { i ->
-                val a by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(600), RepeatMode.Reverse, StartOffset(i * 180)), label = "d$i")
-                Box(Modifier.size(8.dp).alpha(a).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant))
-            }
+    // like Claude Code's status line: a turning star and a random orange word that changes now and then, with the seconds so far
+    var word by remember { mutableStateOf(WORKING_WORDS.random()) }
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        var n = 0
+        while (true) {
+            kotlinx.coroutines.delay(250); n++; tick = n
+            if (n % 12 == 0) word = WORKING_WORDS.filter { it != word }.random()
         }
     }
+    val orange = Color(0xFFD97757)
+    Row(Modifier.padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        // drawn, not a text glyph: phones turn "✳" and friends into colour emoji
+        androidx.compose.foundation.Canvas(Modifier.size(14.dp)) {
+            val r = size.minDimension / 2f * (0.7f + 0.3f * ((tick % 6) / 5f))
+            rotate(tick * 22.5f, center) {
+                for (i in 0 until 4) {
+                    val a = Math.PI * i / 4
+                    val dx = (r * Math.cos(a)).toFloat(); val dy = (r * Math.sin(a)).toFloat()
+                    drawLine(orange, androidx.compose.ui.geometry.Offset(center.x - dx, center.y - dy), androidx.compose.ui.geometry.Offset(center.x + dx, center.y + dy), strokeWidth = 2.4f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                }
+            }
+        }
+        Spacer(Modifier.width(6.dp))
+        Text("$word…", color = orange, fontSize = 12.sp)
+        Text("  ${tick / 4}s", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+    }
 }
+
+private val WORKING_WORDS = listOf(
+    "Pondering", "Cooking", "Brewing", "Churning", "Conjuring", "Noodling", "Percolating", "Simmering", "Spelunking", "Wibbling", "Zigzagging", "Harmonizing",
+    "Ruminating", "Cogitating", "Marinating", "Moseying", "Puzzling", "Reticulating", "Tinkering", "Vibing", "Whirring", "Combobulating", "Incubating", "Manifesting",
+    "Musing", "Orchestrating", "Philosophising", "Sautéing", "Smooshing", "Unravelling", "Crafting", "Finagling", "Gallivanting", "Hatching", "Jiving", "Pontificating",
+    "Flummoxing", "Frolicking", "Herding", "Julienning", "Lollygagging", "Nebulizing", "Scheming", "Whisking",
+)
 
 @Composable
 private fun Composer(value: String, onChange: (String) -> Unit, working: Boolean, hasAtt: Boolean, onAttach: () -> Unit, onSend: () -> Unit, onStop: () -> Unit) {

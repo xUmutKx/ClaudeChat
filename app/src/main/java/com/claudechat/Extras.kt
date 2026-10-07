@@ -14,6 +14,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -22,6 +27,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -95,12 +101,29 @@ fun ChatBackground(modifier: Modifier = Modifier) {
             var x = 0f; while (x < size.width) { drawLine(c, Offset(x, 0f), Offset(x, size.height)); x += step }
             var y = 0f; while (y < size.height) { drawLine(c, Offset(0f, y), Offset(size.width, y)); y += step }
         }
-        "stars" -> Canvas(modifier) {
-            val c = (if (dark) Color.White else Color(0xFF8A6D3B))
-            val n = 46
-            for (i in 0 until n) {
-                val fx = ((i * 7919) % 1000) / 1000f; val fy = ((i * 104729) % 1000) / 1000f
-                drawCircle(c.copy(alpha = .08f + (i % 5) * .03f), (1 + i % 3) * 1.2.dp.toPx(), Offset(fx * size.width, fy * size.height))
+        "stars" -> {
+            // sharp four-pointed stars, yellow and white, each twinkling at its own pace
+            val clock = androidx.compose.animation.core.rememberInfiniteTransition(label = "stars")
+            val tm by clock.animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(9000, easing = androidx.compose.animation.core.LinearEasing)), label = "twinkle")
+            Canvas(modifier) {
+                for (i in 0 until 40) {
+                    val fx = ((i * 7919) % 1000) / 1000f; val fy = ((i * 104729) % 1000) / 1000f
+                    val phase = ((i * 37) % 100) / 100f; val speed = 1 + i % 3
+                    val tw = 0.5f + 0.5f * kotlin.math.sin(2.0 * Math.PI * (tm * speed + phase).toDouble()).toFloat()
+                    val col = if (i % 3 != 0) Color(if (dark) 0xFFFFD54F else 0xFFE0A100) else (if (dark) Color.White else Color(0xFFB8C4D0))
+                    val r = (2.5f + (i % 4) * 1.6f).dp.toPx() * (0.75f + 0.25f * tw)
+                    val cx = fx * size.width; val cy = fy * size.height
+                    val star = androidx.compose.ui.graphics.Path().apply {
+                        for (k in 0 until 8) {
+                            val ang = Math.PI / 4 * k - Math.PI / 2
+                            val rad = if (k % 2 == 0) r else r * 0.28f
+                            val x = cx + (rad * Math.cos(ang)).toFloat(); val y = cy + (rad * Math.sin(ang)).toFloat()
+                            if (k == 0) moveTo(x, y) else lineTo(x, y)
+                        }
+                        close()
+                    }
+                    drawPath(star, col.copy(alpha = 0.15f + 0.75f * tw))
+                }
             }
         }
         else -> {}
@@ -124,12 +147,18 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
                 StatePreview(tr("Idle", "Boşta")) { Mascot(false, Modifier.size(64.dp, 46.dp), sleeping = true) }
                 StatePreview(tr("Working", "Çalışıyor")) { Mascot(true, Modifier.size(64.dp, 46.dp)) }
-                StatePreview(tr("Shell", "Komut")) { Mascot(true, Modifier.size(72.dp, 44.dp), computer = true) }
+                StatePreview(tr("Shell", "Komut")) { Mascot(true, Modifier.size(64.dp, 46.dp), computer = true) }
             }
-            Button({ Engine.previewShell(); onDismiss() }, Modifier.fillMaxWidth()) { Text(tr("Show the blue shell state for 10 s", "Mavi komut durumunu 10 sn göster")) }
             Label(tr("Outfit", "Kıyafet"))
-            Chips(listOf("none" to tr("None", "Yok"), "wizard" to tr("Wizard", "Büyücü"), "crown" to tr("Crown", "Taç"), "party" to tr("Party", "Parti"), "bow" to tr("Bow", "Fiyonk"),
-                "cap" to tr("Cap", "Şapka"), "phones" to tr("Headphones", "Kulaklık"), "halo" to tr("Halo", "Hale"), "ears" to tr("Cat ears", "Kedi kulağı"), "shades" to tr("Shades", "Gözlük"), "santa" to tr("Santa hat", "Noel şapkası")), outfit) { Prefs.pillOutfit.value = it }
+            OutfitPicker(outfit) { Prefs.pillOutfit.value = it }
+            Label(tr("Scene", "Ortam"))
+            ScenePicker()
+            run {
+                val dimStr by Prefs.sceneDim.flow.collectAsState()
+                var dim by remember(dimStr) { mutableFloatStateOf((dimStr.toIntOrNull() ?: 35).toFloat()) }
+                Text(tr("Darken the scene: ${dim.toInt()}%", "Ortamı karart: %${dim.toInt()}"), fontSize = 13.sp)
+                Slider(dim, { dim = it }, valueRange = 0f..90f, onValueChangeFinished = { Prefs.sceneDim.value = dim.toInt().toString() })
+            }
             Label(tr("Body colour", "Gövde rengi"))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Outfit.SKINS.forEach { k ->
@@ -306,5 +335,165 @@ private fun Cmd(cmd: String, clip: androidx.compose.ui.platform.ClipboardManager
             Text(cmd, Modifier.weight(1f).padding(vertical = 8.dp), fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
             IconButton({ clip.setText(AnnotatedString(cmd)) }) { Icon(Icons.Filled.ContentCopy, tr("Copy", "Kopyala")) }
         }
+    }
+}
+
+/** Outfit choices drawn on the mascot itself instead of named in text. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun OutfitPicker(selected: String, onPick: (String) -> Unit) {
+    val skin by Prefs.mascotSkin.flow.collectAsState()
+    val tint = remember(skin) { Outfit.skinMatrix(skin)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Outfit.ALL.forEach { k ->
+            val on = selected == k
+            Box(Modifier.size(64.dp, 58.dp).clip(RoundedCornerShape(14.dp))
+                .background(if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest)
+                .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
+                .clickable { onPick(k) }, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(50.dp, 45.dp)) {
+                    Image(painterResource(R.drawable.ic_mascot18), null, Modifier.fillMaxSize(), colorFilter = tint)
+                    val h = Outfit.hat(k); if (h != 0) Image(painterResource(h), null, Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+}
+
+/** Scenes behind the mascot, shown as pictures with the mascot in them. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ScenePicker() {
+    val sel by Prefs.mascotScene.flow.collectAsState()
+    val skin by Prefs.mascotSkin.flow.collectAsState()
+    val outfit by Prefs.pillOutfit.flow.collectAsState()
+    val tint = remember(skin) { Outfit.skinMatrix(skin)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Outfit.SCENES.forEach { k ->
+            val on = sel == k
+            Box(Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .then(if (on) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier)
+                .clickable { Prefs.mascotScene.value = k }, contentAlignment = Alignment.Center) {
+                val sc = Outfit.scene(k)
+                if (sc != 0) {
+                    Image(painterResource(sc), null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = (Prefs.sceneDim.flow.collectAsState().value.toIntOrNull() ?: 35) / 100f)))
+                }
+                Box(Modifier.size(50.dp, 45.dp)) {
+                    Image(painterResource(R.drawable.ic_mascot18), null, Modifier.fillMaxSize(), colorFilter = tint)
+                    val h = Outfit.hat(outfit); if (h != 0) Image(painterResource(h), null, Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+}
+
+/** Settings > About: the mascot dances in a glow with twinkling sparkles; author, version, GitHub. */
+@Composable
+fun AboutCard() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    val ver = remember { try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "" } catch (e: Exception) { "" } }
+    val code = remember { try { androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(ctx.packageManager.getPackageInfo(ctx.packageName, 0)) } catch (e: Exception) { 0L } }
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        PlayMascot(Modifier.fillMaxWidth().height(280.dp))
+        Text(tr("Press and hold the mascot, then drag and fling it", "Maskota basılı tut, sonra sürükle ve fırlat"), fontSize = 11.sp, color = cs.onSurfaceVariant)
+        Text("Claude Chat", fontFamily = FontFamily.Serif, fontSize = 28.sp)
+        Text("by UmutK", fontSize = 16.sp, color = cs.primary, fontWeight = FontWeight.Medium)
+        Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceContainer) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(tr("Version", "Sürüm") to "$ver ($code)", tr("Package", "Paket") to ctx.packageName, tr("Android", "Android") to "${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})",
+                    tr("Device", "Cihaz") to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}").forEach { (k, v) ->
+                    Row { Text(k, Modifier.weight(1f), color = cs.onSurfaceVariant, fontSize = 13.sp); Text(v, fontSize = 13.sp) }
+                }
+            }
+        }
+        OutlinedButton({ ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/xUmutKx")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }, Modifier.fillMaxWidth()) { Text("GitHub · xUmutKx") }
+        Text(tr("Claude Code on your phone, through a local bridge in Termux. Nothing is sent anywhere except to Claude itself.", "Telefonda Claude Code, Termux'taki yerel bir köprü üzerinden. Claude'un kendisi dışında hiçbir yere bir şey gönderilmez."), fontSize = 12.sp, color = cs.onSurfaceVariant)
+    }
+}
+
+/** Easter egg: the mascot dances in a glow; hold it and it follows the finger like a jelly toy (spring physics), let go and it flies, spins and bounces off the walls. */
+@Composable
+private fun PlayMascot(modifier: Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val dens = androidx.compose.ui.platform.LocalDensity.current
+    val mw = with(dens) { 104.dp.toPx() }; val mh = with(dens) { 94.dp.toPx() }
+    val t = rememberInfiniteTransition(label = "about")
+    val pulse by t.animateFloat(0.55f, 1f, infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "glow")
+    val spin by t.animateFloat(0f, 1f, infiniteRepeatable(tween(4000, easing = LinearEasing)), label = "spin")
+    var area by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    var pos by remember { mutableStateOf(Offset.Zero) }
+    var vel by remember { mutableStateOf(Offset.Zero) }
+    var ang by remember { mutableStateOf(0f) }      // degrees
+    var av by remember { mutableStateOf(0f) }       // degrees / s
+    var held by remember { mutableStateOf(false) }
+    var target by remember { mutableStateOf(Offset.Zero) }
+    LaunchedEffect(area) {
+        if (area.width == 0) return@LaunchedEffect
+        val center = Offset(area.width / 2f, area.height / 2f)
+        if (pos == Offset.Zero) pos = center
+        var last = 0L
+        while (true) {
+            val now = withFrameNanos { it }
+            val dt = if (last == 0L) 0.016f else ((now - last) / 1e9f).coerceAtMost(0.033f); last = now
+            var p = pos; var v = vel
+            val acc: Offset
+            if (held) {
+                val k = 260f; val c = 2f * kotlin.math.sqrt(k) * 0.5f      // slightly under-damped: wobbly
+                acc = (target - p) * k - v * c
+            } else {
+                acc = (center - p) * 2.2f - v * 0.7f                        // a soft pull home, a little drag
+            }
+            v += acc * dt; p += v * dt
+            // walls
+            val minX = mw / 2f; val maxX = area.width - mw / 2f; val minY = mh / 2f; val maxY = area.height - mh / 2f
+            var a2 = av
+            if (p.x < minX) { p = Offset(minX, p.y); if (v.x < 0) { a2 += v.y * 0.05f; v = Offset(-v.x * 0.8f, v.y) } }
+            if (p.x > maxX) { p = Offset(maxX, p.y); if (v.x > 0) { a2 -= v.y * 0.05f; v = Offset(-v.x * 0.8f, v.y) } }
+            if (p.y < minY) { p = Offset(p.x, minY); if (v.y < 0) { a2 -= v.x * 0.05f; v = Offset(v.x, -v.y * 0.8f) } }
+            if (p.y > maxY) { p = Offset(p.x, maxY); if (v.y > 0) { a2 += v.x * 0.05f; v = Offset(v.x, -v.y * 0.8f) } }
+            // rotation: leans against acceleration while held, spins freely after a throw, then unwinds to upright
+            val err = ang - 360f * kotlin.math.round(ang / 360f)
+            val rest = if (held) 70f else 5f
+            val damp = if (held) 5f else 0.9f
+            a2 += (-err * rest - a2 * damp - (if (held) acc.x * 0.05f else 0f)) * dt
+            ang += a2 * dt
+            av = a2; pos = p; vel = v
+        }
+    }
+    val glow = cs.primary
+    Box(modifier.onSizeChanged { area = it }
+        .pointerInput(Unit) { detectTapGestures(onTap = { av += if (vel.x >= 0) 720f else -720f }) }
+        .pointerInput(Unit) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = { target = it; held = true },
+                onDrag = { ch, _ -> target = ch.position },
+                onDragEnd = { held = false; av += vel.x * 0.15f },
+                onDragCancel = { held = false },
+            )
+        }) {
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+            val c = pos
+            val r = 110.dp.toPx()
+            drawCircle(Brush.radialGradient(listOf(glow.copy(alpha = .55f * pulse), glow.copy(alpha = .18f * pulse), Color.Transparent), c, r), r, c)
+            for (i in 0 until 12) {
+                val an = (i / 12f + spin * (if (i % 2 == 0) 1f else -1f)) * 6.2831855f
+                val rr = r * (if (i % 2 == 0) 0.80f else 0.60f)
+                val q = Offset(c.x + rr * kotlin.math.cos(an), c.y + rr * kotlin.math.sin(an))
+                val tw = (0.5f + 0.5f * kotlin.math.sin((spin * 6.2831855f * 3f) + i * 1.7f)).coerceIn(0f, 1f)
+                val sz = (3f + 5f * tw) * density
+                val col = (if (i % 3 == 0) Color(0xFFFFE082) else Color.White).copy(alpha = .25f + .75f * tw)
+                drawLine(col, Offset(q.x - sz, q.y), Offset(q.x + sz, q.y), density)
+                drawLine(col, Offset(q.x, q.y - sz), Offset(q.x, q.y + sz), density)
+                drawCircle(col, sz / 3f, q)
+            }
+        }
+        val speed = kotlin.math.sqrt(vel.x * vel.x + vel.y * vel.y)
+        val stretch = 1f + (speed / 5000f).coerceAtMost(0.18f)
+        Box(Modifier.size(104.dp, 94.dp).graphicsLayer {
+            translationX = pos.x - mw / 2f; translationY = pos.y - mh / 2f
+            rotationZ = ang; scaleX = stretch; scaleY = 2f - stretch
+        }) { Mascot(true, Modifier.fillMaxSize()) }
     }
 }

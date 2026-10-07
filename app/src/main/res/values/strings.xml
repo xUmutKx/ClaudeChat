@@ -99,6 +99,8 @@
     <string name="token">Token</string>
     <string name="regenerate">New</string>
     <string name="auto_start">Start bridge automatically</string>
+    <string name="chat_notes">Remember earlier chats</string>
+    <string name="chat_notes_sub">New chats get short notes on your last chats (not the full text)</string>
 
     <string name="sec_termux">Termux link</string>
     <string name="termux_installed">Termux is installed.</string>
@@ -246,4 +248,5 @@
     <string name="po_ears">Cat ears</string>
     <string name="po_shades">Shades</string>
     <string name="po_santa">Santa hat</string>
+    <string name="err_dropped">The connection to the bridge was interrupted. Claude may still be working; open the chat again or tap Connect.</string>
 </resources>

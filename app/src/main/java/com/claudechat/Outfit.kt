@@ -35,6 +35,14 @@ object Outfit {
         else -> R.drawable.ic_stat_mascot
     }
 
+    /** Backgrounds behind the mascot (header circle + picker previews). */
+    val SCENES = listOf("none", "beach", "forest", "home", "library", "cave", "sea", "plane")
+    fun scene(name: String = Prefs.mascotScene.value): Int = when (name) {
+        "beach" -> R.drawable.bg_scene_beach; "forest" -> R.drawable.bg_scene_forest; "home" -> R.drawable.bg_scene_home
+        "library" -> R.drawable.bg_scene_library; "cave" -> R.drawable.bg_scene_cave; "sea" -> R.drawable.bg_scene_sea
+        "plane" -> R.drawable.bg_scene_plane; else -> 0
+    }
+
     /** Body colours: the target hue (degrees) the orange body is rotated to; "gray" is a special case. */
     val SKINS = listOf("orange", "red", "pink", "purple", "blue", "teal", "green", "yellow", "gray")
     private val HUE = mapOf("red" to 355f, "pink" to 330f, "purple" to 270f, "blue" to 215f, "teal" to 175f, "green" to 125f, "yellow" to 48f)

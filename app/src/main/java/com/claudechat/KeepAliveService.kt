@@ -25,6 +25,15 @@ object Notifier {
         nm.createNotificationChannel(NotificationChannel(CH_DONE, c.getString(R.string.notif_channel_done), NotificationManager.IMPORTANCE_LOW))
     }
 
+    /** A Gradle build the bridge saw finished or failed. */
+    fun build(c: Context, ok: Boolean, project: String) {
+        val l = c.localized()
+        val n = NotificationCompat.Builder(l, CH_DONE).setSmallIcon(Outfit.statIcon())
+            .setContentTitle(if (ok) tr("Build finished", "Derleme bitti") else tr("Build failed", "Derleme başarısız")).setContentText(project)
+            .setOnlyAlertOnce(true).setSilent(true).setContentIntent(open(c)).setAutoCancel(true).build()
+        try { c.getSystemService(NotificationManager::class.java).notify(3, n) } catch (e: SecurityException) { }
+    }
+
     fun open(c: Context): PendingIntent =
         PendingIntent.getActivity(c, 0, Intent(c, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
@@ -55,6 +64,23 @@ class KeepAliveService : Service() {
         Notifier.channels(this)
         startFg(getString(R.string.status_idle))
         overlay = Overlay(applicationContext)
+        scope.launch(Dispatchers.IO) { // a Gradle build the bridge sees finishes or fails: vibrate in the user's pattern
+            var seen = ""
+            while (true) {
+                delay(6_000)
+                if (!Vib.anyBuild()) continue
+                val l = Engine.buildLog() ?: continue
+                val ok = l.third.contains("BUILD SUCCESSFUL"); val bad = l.third.contains("BUILD FAILED")
+                if (!ok && !bad) continue
+                val key = l.first + ok
+                if (key == seen) continue
+                val first = seen.isEmpty()
+                seen = key
+                if (first && l.second > 90) continue // an old log from before: do not announce it
+                Vib.event(if (ok) "build_ok" else "build_fail")
+                if (Vib.on(if (ok) "build_ok" else "build_fail")) Notifier.build(applicationContext, ok, l.first.substringAfterLast('/'))
+            }
+        }
         scope.launch {
             combine(Engine.overall, Engine.overallDetail, Engine.messages, Prefs.overlay.flow.combine(Prefs.black.flow) { s, b -> if (b) (if (s == "off") "pill" else s) + "+black" else s }, Prefs.keepAlive.flow) { st, det, msgs, style, keep ->
                 Snap(st, det, msgs.lastOrNull { it.role == Role.Claude }?.text.orEmpty(), style, keep)
@@ -80,10 +106,14 @@ class KeepAliveService : Service() {
             ).collect { overlay.refreshBlack() }
         }
         scope.launch { // pill look changed (colour, gap, outfit): rebuild it
-            kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { })
-                .drop(4).collect { overlay.onRotate(); startFg(fgText, fgWorking ?: false) }
+            kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { }, Prefs.pillEvents.flow.map { }, Prefs.pillHold.flow.map { })
+                .drop(6).collect { overlay.onRotate(); startFg(fgText, fgWorking ?: false) }
         }
-        scope.launch { Engine.demoShell.collect { overlay.redraw() } }
+        scope.launch { // opacity: no rebuild, just redraw
+            kotlinx.coroutines.flow.merge(Prefs.pillBg.flow.map { }, Prefs.pillAlpha.flow.map { }).drop(2).collect { overlay.refreshOpacity() }
+        }
+        scope.launch { Engine.demoShell.collect { overlay.redraw(); startFg(fgText, fgWorking ?: false) } }
+        scope.launch { Engine.shell.collect { startFg(fgText, fgWorking ?: false) } }
         scope.launch { Prefs.mascotSkin.flow.collect { overlay.redraw() } }
         scope.launch { combine(AppState.foreground, Engine.demoShell) { fg, demo -> fg && !demo }.collect { overlay.setQuiet(it) } } // the shell preview also shows on the pill // chat open: its header mascot shows the status, so the pill hides
     }
@@ -98,7 +128,12 @@ class KeepAliveService : Service() {
         Status.Idle -> getString(R.string.status_idle)
     }
 
+    private var lastSt = Status.Idle
+    /** A shell command or background job runs: the notification shows the mascot at its laptop instead of dancing. */
+    private fun atComputer() = lastSt == Status.Background || (lastSt == Status.Working && Engine.shell.value) || Engine.demoShell.value
+
     private fun apply(s: Snap) {
+        lastSt = s.st
         startFg(label(s.st, s.det), s.st.running)
         overlay.render(s.style, s.st, s.det, s.last)
         val hold = s.keep || s.st.running
@@ -108,7 +143,7 @@ class KeepAliveService : Service() {
             wl?.release(); wl = null
         }
         stopJob?.cancel()
-        if (!s.keep && !s.st.running && s.style == "off") {
+        if (!s.keep && !s.st.running && s.style == "off" && !Vib.anyBuild()) {
             stopJob = scope.launch { delay(12_000); stopSelf() }
         }
     }
@@ -118,19 +153,24 @@ class KeepAliveService : Service() {
     private var fgOutfit = ""
 
     // The flipper animates inside the notification by itself, so the notification is not re-posted to "dance".
-    private fun view(text: String, working: Boolean): android.widget.RemoteViews =
-        android.widget.RemoteViews(packageName, if (working) R.layout.notif_dance else R.layout.notif_still).apply {
+    private fun view(text: String, working0: Boolean): android.widget.RemoteViews {
+        val pc = atComputer()
+        val working = working0 && !pc
+        val layout = if (pc) R.layout.notif_pc else if (working) R.layout.notif_dance else R.layout.notif_still
+        return android.widget.RemoteViews(packageName, layout).apply {
             setTextViewText(R.id.ntitle, getString(R.string.notif_keep_title))
             setTextViewText(R.id.ntext, text)
             val hat = Outfit.hat()
-            val ids = if (working) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2, R.id.m3 to R.id.h3, R.id.m4 to R.id.h4) else listOf(R.id.m1 to R.id.h1)
-            ids.forEach { (m, h) ->
-                if (hat != 0) { setImageViewResource(m, R.drawable.ic_mascot18); setImageViewResource(h, hat); setViewVisibility(h, android.view.View.VISIBLE) }
+            val ids = if (pc) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2) else if (working) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2, R.id.m3 to R.id.h3, R.id.m4 to R.id.h4) else listOf(R.id.m1 to R.id.h1)
+            if (Prefs.showNotifMascot.value != "1") ids.forEach { (m, h) -> setViewVisibility(m, android.view.View.GONE); setViewVisibility(h, android.view.View.GONE) }
+            else ids.forEach { (m, h) ->
+                if (hat != 0) { if (!pc) setImageViewResource(m, R.drawable.ic_mascot18); setImageViewResource(h, hat); setViewVisibility(h, android.view.View.VISIBLE) }
             }
         }
+    }
 
     private fun startFg(text: String, working: Boolean = false) {
-        val outfit = Prefs.pillOutfit.value
+        val outfit = Prefs.pillOutfit.value + Prefs.showNotifMascot.value + atComputer()
         if (text == fgText && fgWorking == working && fgOutfit == outfit) return // identical: do not re-post the notification
         fgText = text; fgWorking = working; fgOutfit = outfit
         val n = NotificationCompat.Builder(this, Notifier.CH_KEEP)

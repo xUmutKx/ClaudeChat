@@ -4,3 +4,5 @@ build/
 local.properties
 *.apk
 .nomedia
+tools/patch_*.py
+tools_*.py

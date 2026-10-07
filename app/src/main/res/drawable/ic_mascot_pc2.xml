@@ -1,13 +1,11 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="20dp" android:height="18dp" android:viewportWidth="20" android:viewportHeight="18">
-    <!-- the mascot (same pixels as ic_mascot18, so hats line up) -->
-    <path android:fillColor="#FFD97757" android:pathData="M3,6H17V13H3Z M1,8H3V11H1Z M17,8H19V11H17Z M4,13H6V16H4Z M7,13H9V16H7Z M11,13H13V16H11Z M14,13H16V16H14Z" />
+    <!-- second frame of the laptop animation: arms a pixel lower (typing), the screen glow dimmer -->
+    <path android:fillColor="#FFD97757" android:pathData="M3,6H17V13H3Z M1,9H3V12H1Z M17,9H19V12H17Z M4,13H6V16H4Z M7,13H9V16H7Z M11,13H13V16H11Z M14,13H16V16H14Z" />
     <path android:fillColor="#FF1F1B18" android:pathData="M6,8H8V9H6Z M12,8H14V9H12Z" />
-    <!-- green light from the screen (the mascot looks at it): covers the whole face, brightest just above the lid -->
-    <path android:fillColor="#7339E58A" android:pathData="M3,6H17V10H3Z" />
+    <path android:fillColor="#4D39E58A" android:pathData="M3,6H17V10H3Z" />
     <!-- both eyes the same black, drawn over the glow -->
     <path android:fillColor="#FF1F1B18" android:pathData="M6,8H8V9H6Z M12,8H14V9H12Z" />
-    <!-- laptop in front of it, covering the whole body, seen from the back: aluminium lid with a small white apple-like logo, base -->
     <path android:fillColor="#FFB8BEC6" android:pathData="M3,9H17V16H3Z" />
     <path android:fillColor="#FF8A9099" android:pathData="M3,15H17V16H3Z" />
     <path android:fillColor="#FFDADFE5" android:pathData="M2,16H18V17H2Z" />

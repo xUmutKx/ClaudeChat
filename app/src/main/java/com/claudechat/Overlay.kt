@@ -36,6 +36,11 @@ class Overlay(base: Context) {
     private var mascot: ImageView? = null
     private var spinner: ProgressBar? = null
     private var mark: TextView? = null
+    private var pcAnim: ValueAnimator? = null     // laptop frames: typing arms, pulsing green light
+    private var zAnim: ObjectAnimator? = null      // the drifting "z" of the sleeping pill
+    private var asleepHidden = false
+    private var sleepTimer: Runnable? = null
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private var term: TextView? = null            // Termux-style ">_" shown on the right while a shell command runs
     private var blink: ValueAnimator? = null
     private var label: TextView? = null
@@ -55,6 +60,17 @@ class Overlay(base: Context) {
     private var bBatt: TextView? = null
     private var cache = Triple(Status.Idle, "", "")
     private var lastStyleIn = ""
+    private var capsule: Capsule? = null
+    private var iconBox: View? = null
+    private var pillVertical = false
+    private var pillSide = 0
+    private var ringFrac = 0.3f
+    private var evProg = 1f                       // event pill: 0 = just the camera ring, 1 = fully open
+    private var evAnim: ValueAnimator? = null
+    private var evHold: Runnable? = null
+    private var evTarget = -1                    // always-on pill: 1 = open, 0 = closed (animated), -1 = not decided yet
+    private var curColor = 0
+    private var glide: ValueAnimator? = null
 
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
 
@@ -74,7 +90,15 @@ class Overlay(base: Context) {
     }
 
     /** The mascot picture: awake or asleep (closed eyes), with the chosen outfit on its head. */
-    private fun mascotDrawable(sleep: Boolean, computer: Boolean = false): android.graphics.drawable.Drawable {
+    private fun mascotDrawable(sleep: Boolean, computer: Boolean = false, alt: Boolean = false): android.graphics.drawable.Drawable {
+        val base = mascotDrawableBase(sleep, computer, alt)
+        val sc = if (Prefs.sceneInPill.value == "1") Outfit.scene() else 0
+        if (sc == 0) return base
+        val shade = android.graphics.drawable.ColorDrawable(android.graphics.Color.argb((255 * (Prefs.sceneDim.value.toIntOrNull() ?: 35) / 100), 0, 0, 0))
+        return android.graphics.drawable.LayerDrawable(arrayOf(androidx.core.content.ContextCompat.getDrawable(ctx, sc)!!.mutate(), shade, base))
+    }
+
+    private fun mascotDrawableBase(sleep: Boolean, computer: Boolean = false, alt: Boolean = false): android.graphics.drawable.Drawable {
         val hat = when (Prefs.pillOutfit.value) {
             "wizard" -> R.drawable.ic_hat_wizard
             "crown" -> R.drawable.ic_hat_crown
@@ -86,11 +110,9 @@ class Overlay(base: Context) {
         fun d(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate().also { if (skin != null) it.colorFilter = android.graphics.ColorMatrixColorFilter(skin) }
         fun h(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate()
         if (computer) {
-            if (hat == 0) return d(R.drawable.ic_mascot_pc)
-            // the picture is 30 columns wide (mascot + laptop); the hat covers only the mascot's 20 on the left
-            return android.graphics.drawable.LayerDrawable(arrayOf(d(R.drawable.ic_mascot_pc), h(hat))).also {
-                it.setLayerGravity(1, android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL)
-            }
+            val pcId = if (alt) R.drawable.ic_mascot_pc2 else R.drawable.ic_mascot_pc
+            if (hat == 0) return d(pcId)
+            return android.graphics.drawable.LayerDrawable(arrayOf(d(pcId), h(hat)))
         }
         if (hat == 0) return d(if (sleep) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot)
         // outfit drawables share a taller 20x18 canvas so the hat fits above the head
@@ -114,11 +136,13 @@ class Overlay(base: Context) {
         Status.Idle -> ctx.localized().getString(R.string.ov_idle)
     }
 
+    private val SLEEP: CharSequence = android.text.SpannableString("zZ").apply { setSpan(android.text.style.RelativeSizeSpan(0.7f), 0, 1, 0) }
+
     private fun markOf(st: Status) = when (st) {
         Status.Done -> "✓"
         Status.Error -> "✕"
         Status.Offline -> "!"
-        Status.Idle -> "z" // asleep
+        Status.Idle -> SLEEP // asleep: a small z and a bigger Z
         else -> "•"
     }
 
@@ -132,9 +156,28 @@ class Overlay(base: Context) {
         val c = if (shell) 0xFF2196F3.toInt() else color(st)
         val working = st.running
         spinner?.visibility = if (working && style != "pill") View.VISIBLE else View.GONE
-        spinner?.indeterminateTintList = ColorStateList.valueOf(c)
-        ring?.set(c, working, st != Status.Idle)
+        ring?.set(working, st != Status.Idle)
+        glideTo(c)
         mark?.visibility = if (working) View.GONE else View.VISIBLE
+        // laptop: swap two frames while it is shown
+        if (st == Status.Background || shell) {
+            if (pcAnim == null) pcAnim = ValueAnimator.ofInt(0, 1).apply {
+                duration = 900; repeatCount = ValueAnimator.INFINITE
+                var last = false
+                addUpdateListener { val a = it.animatedFraction >= 0.5f; if (a != last) { last = a; mascot?.setImageDrawable(mascotDrawable(false, true, a)) } }
+                start()
+            }
+        } else { pcAnim?.cancel(); pcAnim = null }
+        // asleep (idle / done) for a while: hide the pill until Claude works again
+        run {
+            val secs = Prefs.pillSleepHide.value.toIntOrNull() ?: 0
+            if (eventMode() || st.running || st == Status.Error || st == Status.Offline || secs <= 0) {
+                sleepTimer?.let { main.removeCallbacks(it) }; sleepTimer = null
+                if (asleepHidden) { asleepHidden = false; applyQuiet() }
+            } else if (!asleepHidden && sleepTimer == null) {
+                sleepTimer = Runnable { sleepTimer = null; asleepHidden = true; applyQuiet() }.also { main.postDelayed(it, secs * 1000L) }
+            }
+        }
         term?.let { t ->
             // like the colon of a digital clock: the underscore comes and goes
             if (shell && style == "pill") {
@@ -147,25 +190,22 @@ class Overlay(base: Context) {
                 }
             } else { blink?.cancel(); blink = null; t.visibility = View.GONE; t.text = ">_" }
         }
-        mark?.text = markOf(st); mark?.setTextColor(c)
+        mark?.text = markOf(st)
         mascot?.setImageDrawable(mascotDrawable(st == Status.Idle, st == Status.Background || shell)) // background shell: laptop + blue face; idle: eyes closed + "z"
         label?.text = text(st, det)
         if (style == "pill") {
             // idle: the mascot sleeps in the pill (eyes closed, "z"); done turns into sleep after a moment
-            root?.visibility = View.VISIBLE
             if (st == Status.Done) root?.let { r -> r.postDelayed({
-                if (lastStatus == Status.Done) { mascot?.setImageDrawable(mascotDrawable(true)); mark?.text = markOf(Status.Idle); mark?.setTextColor(color(Status.Idle)) }
+                if (lastStatus == Status.Done) { mascot?.setImageDrawable(mascotDrawable(true)); mark?.text = markOf(Status.Idle); mark?.setTextColor(color(Status.Idle)); updateZ() }
             }, 3500) }
-            val show = true
-            val sides = listOfNotNull(mascot, spinner?.parent as? View)
+            val show = !eventMode()
+            val sides = emptyList<View>()
             sides.forEach { v ->
                 if (show && v.visibility != View.VISIBLE) { v.visibility = View.VISIBLE; v.scaleX = 0f; v.scaleY = 0f; v.animate().scaleX(1f).scaleY(1f).setDuration(700).setInterpolator(android.view.animation.DecelerateInterpolator()).start() }
                 else if (!show) { v.animate().cancel(); v.visibility = View.GONE }
             }
         }
         sub?.text = last.trim().lines().lastOrNull { it.isNotBlank() }?.take(140).orEmpty()
-        bar?.setBackgroundColor(c)
-        (root?.background as? GradientDrawable)?.setStroke(dp(2), c)
         pulse?.let { if (working) { if (!it.isRunning) it.start() } else { it.cancel(); bar?.alpha = 1f } }
         (root as? LinearLayout)?.let { r ->
             if (working) r.animate().alpha(0.9f).setDuration(1800).withEndAction { r.animate().alpha(1f).setDuration(1800).start() }.start() else { r.animate().cancel(); r.alpha = 1f }
@@ -175,10 +215,27 @@ class Overlay(base: Context) {
         // Eyes animation on status change (start/done)
         if (st != lastStatus) {
             lastStatus = st
-            if (st.running || st == Status.Done) mascot?.let { playEyesAnimation(it) }
+            if (eventMode()) { if (st != Status.Idle) showEvent() }
+            else if (st.running || st == Status.Done) mascot?.let { playEyesAnimation(it) }
         }
         applyQuiet()
+        updateZ()
     }
+
+    /** The sleeping pill's "z" floats up and fades in and out, like in the chat header. */
+    private fun updateZ() {
+        val m = mark ?: return
+        if (m.text.toString() == "zZ" && m.visibility == View.VISIBLE) {
+            if (zAnim == null) zAnim = ObjectAnimator.ofPropertyValuesHolder(m,
+                android.animation.PropertyValuesHolder.ofFloat(View.ALPHA, 0.25f, 1f),
+                android.animation.PropertyValuesHolder.ofFloat(View.TRANSLATION_Y, dp(2).toFloat(), -dp(3).toFloat())).apply {
+                duration = 1400; repeatCount = ValueAnimator.INFINITE; repeatMode = ValueAnimator.REVERSE; start()
+            }
+        } else { zAnim?.cancel(); zAnim = null; m.alpha = 1f; m.translationY = 0f }
+    }
+
+    /** Opacity sliders moved: redraw the pill at its current open state. */
+    fun refreshOpacity() { if (root != null && style == "pill") applyProg(evProg) }
 
     /** Re-draw with the last known state (look settings or the shell preview changed). */
     fun redraw() { if (root != null) render(lastStyleIn, cache.first, cache.second, cache.third) }
@@ -187,8 +244,13 @@ class Overlay(base: Context) {
     private var quiet = false
     fun setQuiet(q: Boolean) { quiet = q; applyQuiet() }
     private fun applyQuiet() {
-        val v = if (quiet) View.INVISIBLE else View.VISIBLE
-        root?.visibility = v; blackLayer?.visibility = v
+        // only the island hides; the black layer is the whole point of black mode and stays (the island stays too while it is on)
+        val hide = (quiet || asleepHidden || (eventMode() && evProg <= 0.001f && evAnim?.isRunning != true)) && blackLayer == null
+        if (style == "pill" && !eventMode()) {
+            val want = if (hide) 0 else 1
+            if (want != evTarget) animatePill(want == 1)
+        } else root?.visibility = if (hide) View.INVISIBLE else View.VISIBLE
+        blackLayer?.visibility = View.VISIBLE
     }
 
     /** Mascot pops bigger (eyes widen) on start/finish, then settles back. */
@@ -196,6 +258,120 @@ class Overlay(base: Context) {
         v.animate().cancel()
         v.animate().scaleX(1.1f).scaleY(1.1f).setDuration(800).setInterpolator(android.view.animation.DecelerateInterpolator())
             .withEndAction { v.animate().scaleX(1f).scaleY(1f).setDuration(900).start() }.start()
+    }
+
+    /** The pill's background: a capsule that can be drawn narrower than its bounds (centred), so it can grow out of the camera. */
+    private class Capsule(var fill: Int, var stroke: Int, val strokePx: Float) : android.graphics.drawable.Drawable() {
+        var frac = 1f
+        var fillMul = 1f
+        private var a = 255
+        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        override fun draw(c: Canvas) {
+            val b = bounds
+            val w = b.width() * frac; val cx = b.exactCenterX(); val r = b.height() / 2f
+            val rect = RectF(cx - w / 2f, b.top.toFloat(), cx + w / 2f, b.bottom.toFloat())
+            p.style = Paint.Style.FILL; p.color = fill; p.alpha = (a * fillMul).toInt()
+            c.drawRoundRect(rect, r, r, p)
+            if (strokePx > 0f) {
+                val h = strokePx / 2f
+                p.style = Paint.Style.STROKE; p.strokeWidth = strokePx; p.color = stroke; p.alpha = a
+                c.drawRoundRect(RectF(rect.left + h, rect.top + h, rect.right - h, rect.bottom - h), r - h, r - h, p)
+            }
+        }
+        override fun setAlpha(alpha: Int) { a = alpha }
+        override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+        @Deprecated("Deprecated in Java") override fun getOpacity() = PixelFormat.TRANSLUCENT
+    }
+
+    private fun eventMode() = style == "pill" && Prefs.pillEvents.value == "1"
+
+    /** Colours change gently (orange to blue to green) instead of snapping. */
+    private fun glideTo(target: Int) {
+        if (curColor == 0) { applyColor(target); return }
+        if (target == curColor && glide == null) return
+        glide?.cancel()
+        glide = ValueAnimator.ofObject(android.animation.ArgbEvaluator(), curColor, target).apply {
+            duration = 700
+            addUpdateListener { applyColor(it.animatedValue as Int) }
+            addListener(object : android.animation.AnimatorListenerAdapter() { override fun onAnimationEnd(a: android.animation.Animator) { glide = null } })
+            start()
+        }
+    }
+
+    private fun applyColor(c: Int) {
+        curColor = c
+        ring?.setColor(c)
+        mark?.setTextColor(c)
+        spinner?.indeterminateTintList = ColorStateList.valueOf(c)
+        capsule?.let { it.stroke = c; it.invalidateSelf() }
+        bar?.setBackgroundColor(c)
+        (root?.background as? GradientDrawable)?.setStroke(dp(2), c)
+    }
+
+    /** Opens/closes the event pill: 0 = only the ring around the camera, 1 = the whole pill. */
+    private fun applyProg(p: Float) {
+        evProg = p
+        val ringA = (p / 0.25f).coerceIn(0f, 1f)
+        val q = ((p - 0.25f) / 0.75f).coerceIn(0f, 1f)
+        val all = ((Prefs.pillAlpha.value.toIntOrNull() ?: 100).coerceIn(10, 100)) / 100f
+        ring?.alpha = ringA * all
+        capsule?.let { it.frac = ringFrac + (1f - ringFrac) * q; it.fillMul = ((Prefs.pillBg.value.toIntOrNull() ?: 100).coerceIn(0, 100)) / 100f; it.alpha = (255 * ringA * all).toInt(); it.invalidateSelf() }
+        val sideA = ((q - 0.35f) / 0.65f).coerceIn(0f, 1f)
+        val sc = 0.7f + 0.3f * sideA
+        mascot?.let { it.alpha = sideA * all; it.scaleX = sc; it.scaleY = sc; if (!pillVertical) it.translationX = (1f - q) * pillSide * 0.9f }
+        iconBox?.let { it.alpha = sideA * all; it.scaleX = sc; it.scaleY = sc; if (!pillVertical) it.translationX = -(1f - q) * pillSide * 0.9f }
+        root?.invalidate()
+    }
+
+    /** Something changed: the ring spins once around the camera, then the pill grows out to both sides, stays a while and shrinks back. */
+    private fun showEvent() {
+        evHold?.let { main.removeCallbacks(it) }; evAnim?.cancel()
+        root?.visibility = View.VISIBLE
+        ring?.burst()
+        val from = evProg
+        evAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = (1250 * (1f - from) + 350).toLong()
+            interpolator = android.animation.TimeInterpolator { t ->
+                val e = if (t < 0.3f) 0.25f * (t / 0.3f) else 0.25f + 0.75f * (1f - Math.pow(1.0 - ((t - 0.3f) / 0.7f), 3.0).toFloat())
+                from + (e - from).coerceAtLeast(0f)
+            }
+            addUpdateListener { applyProg(it.animatedValue as Float) }
+            start()
+        }
+        val hold = (Prefs.pillHold.value.toIntOrNull() ?: 4).coerceIn(1, 15) * 1000L
+        evHold = Runnable { hideEvent() }.also { main.postDelayed(it, 1300 + hold) }
+    }
+
+    /** Always-on pill: opens like the event pill (ring lap, then grows out of the camera) or closes back into it. */
+    private fun animatePill(open: Boolean) {
+        evTarget = if (open) 1 else 0
+        evAnim?.cancel()
+        val from = evProg
+        if (open) { root?.visibility = View.VISIBLE; if (from < 0.05f) ring?.burst() }
+        else if (from <= 0.001f) { root?.visibility = View.INVISIBLE; return }
+        evAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = if (open) (1250 * (1f - from) + 350).toLong() else 750
+            interpolator = if (open) android.animation.TimeInterpolator { t ->
+                val e = if (t < 0.3f) 0.25f * (t / 0.3f) else 0.25f + 0.75f * (1f - Math.pow(1.0 - ((t - 0.3f) / 0.7f), 3.0).toFloat())
+                from + (e - from).coerceAtLeast(0f)
+            } else android.animation.TimeInterpolator { t -> from * (1f - android.view.animation.AccelerateDecelerateInterpolator().getInterpolation(t)) }
+            addUpdateListener { applyProg(it.animatedValue as Float) }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) { evAnim = null; if (!open) root?.visibility = View.INVISIBLE }
+            })
+            start()
+        }
+    }
+
+    private fun hideEvent() {
+        evAnim?.cancel()
+        val from = evProg
+        evAnim = ValueAnimator.ofFloat(from, 0f).apply {
+            duration = 750; interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            addUpdateListener { applyProg(it.animatedValue as Float) }
+            addListener(object : android.animation.AnimatorListenerAdapter() { override fun onAnimationEnd(a: android.animation.Animator) { evAnim = null; applyQuiet() } })
+            start()
+        }
     }
 
     /** Thin ring drawn around the camera hole: a spinning arc while working, a full ring otherwise. */
@@ -209,13 +385,26 @@ class Overlay(base: Context) {
         }
 
         private var shown = true
-        fun set(color: Int, working: Boolean, shown: Boolean = true) {
-            p.color = color; this.working = working; this.shown = shown
-            if (working) { if (!anim.isRunning) anim.start() } else { anim.cancel(); spin = 0f }
+        private var bursting = false
+        private var burstAnim: ValueAnimator? = null
+        fun setColor(color: Int) { p.color = color; invalidate() }
+        fun set(working: Boolean, shown: Boolean = true) {
+            this.working = working; this.shown = shown
+            if (working) { if (!anim.isRunning) anim.start() } else if (!bursting) { anim.cancel(); spin = 0f }
             invalidate()
         }
+        /** One quick lap of the arc around the camera. */
+        fun burst() {
+            burstAnim?.cancel(); bursting = true
+            burstAnim = ValueAnimator.ofFloat(0f, 720f).apply {
+                duration = 950; interpolator = android.view.animation.DecelerateInterpolator(1.2f)
+                addUpdateListener { spin = it.animatedValue as Float; invalidate() }
+                addListener(object : android.animation.AnimatorListenerAdapter() { override fun onAnimationEnd(a: android.animation.Animator) { bursting = false; invalidate() } })
+                start()
+            }
+        }
 
-        override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
+        override fun onDetachedFromWindow() { anim.cancel(); burstAnim?.cancel(); super.onDetachedFromWindow() }
 
         override fun onDraw(c: Canvas) {
             val d = resources.displayMetrics.density
@@ -223,7 +412,7 @@ class Overlay(base: Context) {
             p.strokeWidth = 1.2f * d
             val r = minOf(width, height) / 2f - p.strokeWidth - 1f // 1px off the radius = 2px smaller diameter
             val box = RectF(width / 2f - r, height / 2f - r, width / 2f + r, height / 2f + r)
-            if (working) c.drawArc(box, spin, 90f, false, p) else c.drawArc(box, 0f, 360f, false, p)
+            if (working || bursting) c.drawArc(box, spin, 110f, false, p) else c.drawArc(box, 0f, 360f, false, p)
         }
     }
 
@@ -380,11 +569,14 @@ class Overlay(base: Context) {
                 val trim = 1 // px taken off each long side of the pill (the pill is 2 px thinner than the camera rim)
                 val thick = hole + 2 * rim - 2 * trim // pill thickness across the edge
                 val ringLen = (if (vertical) cut.height() else cut.width()) + 2 * rim + dp(6)
-                val side = dp(40)
+                val extra = (Prefs.pillExtra.value.toIntOrNull() ?: 5).coerceIn(0, 24) // px added to each end; more reach = more status icons covered
+                val side = dp(40) + extra
+                val cap = Capsule(if (Prefs.pillColor.value == "white") Color.WHITE else Color.BLACK, Color.TRANSPARENT, dp(2).toFloat())
+                capsule = cap
                 val box = LinearLayout(ctx).apply {
                     orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
-                    background = GradientDrawable().apply { cornerRadius = thick / 2f; setColor(if (Prefs.pillColor.value == "white") Color.WHITE else Color.BLACK) }
+                    background = cap
                 }
                 fun lp(len: Int) = if (vertical) LinearLayout.LayoutParams(thick, len) else LinearLayout.LayoutParams(len, thick)
                 mascot = ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot); setPadding(dp(8), dp(3), dp(4), dp(3)) }
@@ -395,13 +587,15 @@ class Overlay(base: Context) {
                 spinner = ProgressBar(ctx).apply { isIndeterminate = true }
                 mark = TextView(ctx).apply { textSize = 15f; gravity = Gravity.CENTER; setTypeface(typeface, android.graphics.Typeface.BOLD) }
                 icon.addView(spinner, FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
-                icon.addView(mark, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+                icon.addView(mark, FrameLayout.LayoutParams(dp(30), dp(20), Gravity.CENTER))
                 term = TextView(ctx).apply {
-                    text = ">_"; textSize = 13f; gravity = Gravity.CENTER; typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
+                    text = ">_"; textSize = 12f; gravity = Gravity.CENTER; typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
                     setTextColor(0xFF2196F3.toInt()); visibility = View.GONE
                 }
                 icon.addView(term, FrameLayout.LayoutParams(dp(30), dp(20), Gravity.CENTER))
                 box.addView(icon, lp(side))
+                iconBox = icon; pillVertical = vertical; pillSide = side
+                ringFrac = ringLen.toFloat() / (2 * side + ringLen)
                 label = TextView(ctx) // off-screen: the pill is a single strip
                 bob = dancer(mascot!!, dp(2).toFloat())
                 root = box
@@ -421,6 +615,7 @@ class Overlay(base: Context) {
                     if (Build.VERSION.SDK_INT >= 30) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                     else if (Build.VERSION.SDK_INT >= 28) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 })
+                evTarget = -1; applyProg(0f)
             }
             "bubble" -> { // a draggable round head: tap opens the chat, drag moves it, it snaps to the nearest side
                 val size = dp(58)
@@ -496,9 +691,12 @@ class Overlay(base: Context) {
 
     fun hide() {
         pulse?.cancel(); bob?.cancel(); eyes?.cancel(); bBob?.cancel(); blink?.cancel(); blink = null; term = null
+        pcAnim?.cancel(); pcAnim = null; zAnim?.cancel(); zAnim = null; sleepTimer?.let { main.removeCallbacks(it) }; sleepTimer = null; asleepHidden = false
         root?.let { try { wm.removeView(it) } catch (e: Exception) { } }
         blackLayer?.let { try { wm.removeView(it) } catch (e: Exception) { } }; blackLayer = null
         bStatus = null; bDet = null; bLast = null; bBatt = null; bMascot = null; bBob = null
+        evAnim?.cancel(); evAnim = null; evHold?.let { main.removeCallbacks(it) }; evHold = null; glide?.cancel(); glide = null; curColor = 0
+        capsule = null; iconBox = null; evProg = 1f; evTarget = -1
         root = null; style = ""
         mascot = null; spinner = null; mark = null; label = null; sub = null; bar = null; pulse = null; bob = null; eyes = null; ring = null
         lastStatus = null
@@ -506,7 +704,7 @@ class Overlay(base: Context) {
 }
 
 /** Bundled fonts (SIL OFL) for the always-on clock; variable ones get a weight. */
-private fun clockFont(ctx: Context, key: String): android.graphics.Typeface {
+fun clockFont(ctx: Context, key: String): android.graphics.Typeface {
     fun asset(file: String, wght: Int? = null) = runCatching {
         android.graphics.Typeface.Builder(ctx.assets, "fonts/$file.ttf").apply { if (wght != null) setFontVariationSettings("'wght' $wght") }.build()
     }.getOrNull()

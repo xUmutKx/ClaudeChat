@@ -67,6 +67,54 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ path: p, parent: path.dirname(p), dirs }));
   }
+  if (req.method === 'GET' && req.url === '/build') {
+    // newest recent log that looks like a Gradle build (Claude Code background-task output, or a *build*.log in the project folders)
+    const fs = require('fs'), path = require('path');
+    const found = [];
+    const walk = (dir, depth) => {
+      if (depth > 6) return;
+      let ents = [];
+      try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+      for (const e of ents) {
+        const f = path.join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== 'node_modules' && e.name !== '.git' && e.name !== 'build' && e.name !== '.gradle') walk(f, depth + 1); }
+        else if (/\.(output|log)$/.test(e.name)) { try { const st = fs.statSync(f); if (Date.now() - st.mtimeMs < 30 * 60 * 1000 && st.size > 200) found.push({ f, m: st.mtimeMs, size: st.size }); } catch (x) {} }
+      }
+    };
+    walk('/tmp', 0); walk('/root/projects', 3); walk('/sdcard/Download/projects', 1);
+    found.sort((a, b) => b.m - a.m);
+    let out = { file: '', age: -1, text: '' };
+    for (const c of found.slice(0, 12)) {
+      try {
+        const fd = fs.openSync(c.f, 'r'); const len = Math.min(c.size, 200000); const buf = Buffer.alloc(len);
+        fs.readSync(fd, buf, 0, len, c.size - len); fs.closeSync(fd);
+        const t = buf.toString('utf8');
+        if (/> Task :|Configure project|BUILD (SUCCESSFUL|FAILED)/.test(t)) { out = { file: c.f, age: Math.round((Date.now() - c.m) / 1000), text: t }; break; }
+      } catch (e) {}
+    }
+    // a Gradle JVM is running right now (the dex / R8 steps print nothing for minutes, so the log alone cannot tell)
+    let alive = false;
+    try {
+      for (const d of fs.readdirSync('/proc')) {
+        if (!/^\d+$/.test(d) || Number(d) === process.pid) continue;
+        try { if (/org\.gradle|GradleDaemon|GradleWrapperMain/.test(fs.readFileSync('/proc/' + d + '/cmdline', 'utf8'))) { alive = true; break; } } catch (x) {}
+      }
+    } catch (e) {}
+    out.alive = alive;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(out));
+  }
+  if (req.method === 'GET' && req.url === '/ps') {
+    const list = [...procs.entries()].map(([chat, p]) => ({ chat, pid: p.child.pid, busy: !!p.sink, idle: Math.round((Date.now() - p.last) / 1000) }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ procs: list }));
+  }
+  if (req.method === 'POST' && req.url === '/kill') {
+    let b;
+    try { b = await readBody(req); } catch (e) { res.writeHead(400); return res.end('bad json'); }
+    drop(String(b.chat || ''));
+    res.writeHead(200); return res.end('ok');
+  }
   if (req.method === 'POST' && req.url === '/title') {
     let b;
     try { b = await readBody(req); } catch (e) { res.writeHead(400); return res.end('bad json'); }

@@ -2,6 +2,12 @@ package com.claudechat
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.border
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -9,6 +15,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -18,13 +25,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.QueryStats
@@ -144,7 +154,7 @@ private fun rememberTick(): Int {
 }
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, onSetup: () -> Unit = {}) {
+fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, onSetup: () -> Unit = {}, onTasks: () -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val tick = rememberTick()
@@ -166,11 +176,61 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
     LaunchedEffect(tick) { bridge = Engine.ping() }
 
     var det by remember { mutableStateOf(false) }
-    var cat by rememberSaveable { mutableStateOf("conn") }
-    Page(R.string.settings, onBack) {
-        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(listOf("conn" to tr("Connection", "Bağlantı"), "look" to tr("Look", "Görünüm"), "overlay" to tr("Overlay", "Overlay"), "black" to tr("Black screen", "Siyah ekran"), "claude" to "Claude", "alive" to tr("Stay alive", "Açık kalma"))) { (k, l) ->
-                FilterChip(cat == k, { cat = k }, { Text(l) })
+    var cat by rememberSaveable { mutableStateOf("") } // "" = the list of categories
+    var query by rememberSaveable { mutableStateOf("") }
+    BackHandler(cat.isNotEmpty()) { cat = "" }
+    val cats = listOf(
+        SettingsCat("conn", Icons.Filled.Link, tr("Connection", "Bağlantı"), tr("Termux bridge, port, token", "Termux köprüsü, port, anahtar"), tr("Claude", "Claude"),
+            "bridge termux port token connect köprü anahtar"),
+        SettingsCat("claude", Icons.Filled.Build, tr("Claude", "Claude"), tr("Permissions and folders", "İzinler ve klasörler"), tr("Claude", "Claude"),
+            "permission mode working folder attachment folder notes izin modu çalışma klasörü ek klasörü"),
+        SettingsCat("usage", Icons.Filled.Memory, tr("Usage & limits", "Kullanım ve limitler"), tr("5-hour and weekly limits, builds, CPU and memory", "5 saatlik ve haftalık limit, derleme, CPU, bellek"), tr("Claude", "Claude"),
+            "usage limits five hour weekly build progress cpu memory resources kullanım limit derleme kaynak"),
+        SettingsCat("tasks", Icons.Filled.QueryStats, tr("Task manager", "Görev yöneticisi"), tr("Running chats and commands", "Çalışan sohbetler ve komutlar"), tr("Claude", "Claude"),
+            "running chats shell commands stop tasks görev çalışan"),
+        SettingsCat("look", Icons.Filled.Palette, tr("Look", "Görünüm"), tr("Theme and language", "Tema ve dil"), tr("Appearance", "Görünüm"),
+            "theme dark mode language tema koyu mod dil"),
+        SettingsCat("overlay", Icons.Filled.Layers, tr("Pill & overlay", "Pill ve overlay"), tr("Camera pill, bubble, line, curtain", "Kamera pill'i, balon, çizgi, perde"), tr("Appearance", "Görünüm"),
+            "pill floating bubble line curtain length hide asleep event change balon çizgi perde uyku değişim"),
+        SettingsCat("black", Icons.Filled.DarkMode, tr("Black screen", "Siyah ekran"), tr("AOD clock, brightness, widgets", "AOD saati, parlaklık, widget"), tr("Appearance", "Görünüm"),
+            "aod clock brightness widgets date battery font saat parlaklık tarih pil yazı tipi"),
+        SettingsCat("vibe", Icons.Filled.Vibration, tr("Vibration", "Titreşim"), tr("Your own pattern for each event", "Her olay için kendi şeklin"), tr("Appearance", "Görünüm"),
+            "vibrate pattern answer error build titreşim cevap hata derleme"),
+        SettingsCat("alive", Icons.Filled.BatteryChargingFull, tr("Stay alive", "Açık kalma"), tr("Battery, wake lock, setup wizard", "Pil, uyanık tutma, kurulum sihirbazı"), tr("Phone", "Telefon"),
+            "battery wake lock keep alive setup wizard root tweaks pil uyanık kurulum"),
+        SettingsCat("about", Icons.Filled.Info, tr("About", "Hakkında"), tr("Version, author, GitHub", "Sürüm, yapımcı, GitHub"), tr("About", "Hakkında"),
+            "version author github sürüm yapımcı"),
+    )
+    Page(R.string.settings, { if (cat.isNotEmpty()) cat = "" else onBack() }) {
+        if (cat.isEmpty()) {
+            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text(tr("Search settings", "Ayarlarda ara")) },
+                leadingIcon = { Icon(Icons.Filled.Search, null) },
+                trailingIcon = { if (query.isNotEmpty()) IconButton({ query = "" }) { Icon(Icons.Filled.Close, tr("Clear", "Temizle")) } })
+            val shown = cats.filter { query.isBlank() || it.title.contains(query.trim(), true) || it.sub.contains(query.trim(), true) || it.keywords.contains(query.trim(), true) }
+            var lastGroup = ""
+            shown.forEach { c ->
+                if (query.isBlank() && c.group != lastGroup) {
+                    lastGroup = c.group
+                    Text(c.group.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 6.dp, top = 12.dp, bottom = 2.dp))
+                }
+                Surface(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { cat = c.key }, color = MaterialTheme.colorScheme.surfaceContainer) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(c.icon, null, Modifier.size(26.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(c.title, style = MaterialTheme.typography.titleMedium)
+                            Text(c.sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        }
+                        Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if (shown.isEmpty()) Hint(tr("Nothing matches.", "Eşleşen ayar yok."))
+        } else cats.firstOrNull { it.key == cat }?.let { c ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(c.icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(12.dp))
+                Text(c.title, style = MaterialTheme.typography.titleLarge)
             }
         }
         if (cat == "conn") Section(R.string.sec_method) {
@@ -228,7 +288,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             SwitchRow(R.string.auto_start, null, auto) { Prefs.autoStart.value = it }
         }
 
-        if (cat == "conn") Section(R.string.sec_usage) {
+        if (cat == "usage") Section(R.string.sec_usage) {
             val p = limits.split("|")
             val rows = listOf(R.string.lim_five to 0, R.string.lim_week to 2)
             if (p.size < 4 || p[0].isEmpty() && p[2].isEmpty()) Hint(stringResource(R.string.lim_none))
@@ -246,27 +306,72 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
         }
 
 
+        if (cat == "about") AboutCard()
+
+        if (cat == "vibe") VibeSettings()
+        if (cat == "tasks") { LaunchedEffect(Unit) { cat = ""; onTasks() } }
+
+        if (cat == "usage") { BuildCard(); UsageCard() }
+
         if (cat == "look") Section(R.string.sec_appearance) {
             Choices(listOf("system" to R.string.theme_system, "light" to R.string.theme_light, "dark" to R.string.theme_dark, "amoled" to R.string.theme_amoled), theme) { Prefs.theme.value = it }
             Choices(listOf("en" to R.string.lang_en, "tr" to R.string.lang_tr), lang) { if (it != lang) { Prefs.lang.value = it; onLang() } }
         }
 
         if (cat == "overlay") Section(R.string.sec_overlay) {
+            val sleepHide by Prefs.pillSleepHide.flow.collectAsState()
+            val headerOn by Prefs.showHeaderMascot.flow.collectAsState()
+            val scenePill by Prefs.sceneInPill.flow.collectAsState()
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(tr("Scene behind the mascot in the pill", "Pill'deki maskotun arkasında ortam"), Modifier.weight(1f)); Switch(scenePill == "1", { Prefs.sceneInPill.value = if (it) "1" else "0" }) }
+            val notifOn by Prefs.showNotifMascot.flow.collectAsState()
+            Text(tr("Where the mascot shows", "Maskot nerede görünsün"), style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(tr("Chat screen, top left", "Sohbet ekranı, sol üst"), Modifier.weight(1f)); Switch(headerOn == "1", { Prefs.showHeaderMascot.value = if (it) "1" else "0" }) }
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(tr("Notification", "Bildirim"), Modifier.weight(1f)); Switch(notifOn == "1", { Prefs.showNotifMascot.value = if (it) "1" else "0" }) }
+            Hint(tr("The camera pill is chosen below (Off hides it). Each place can be on or off on its own.", "Kamera pill'i aşağıdan seçilir (Kapalı gizler). Her yer ayrı ayrı açılıp kapatılabilir."))
+            val hideOn = sleepHide != "0"
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(tr("Hide the pill after it has been asleep", "Uyuduktan sonra pill gizlensin"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                Switch(hideOn, { Prefs.pillSleepHide.value = if (it) "120" else "0" })
+            }
+            if (hideOn) {
+                var secs by remember { mutableFloatStateOf((sleepHide.toFloatOrNull() ?: 120f).coerceIn(10f, 600f)) }
+                val shown = secs.toInt()
+                Text(tr("After ", "Süre: ") + if (shown >= 60) "${shown / 60} " + tr("min", "dk") + (if (shown % 60 != 0) " ${shown % 60} " + tr("s", "sn") else "") else "$shown " + tr("s", "sn"), style = MaterialTheme.typography.bodyMedium)
+                Slider(secs, { secs = (Math.round(it / 5f) * 5f).coerceIn(10f, 600f) }, valueRange = 10f..600f, steps = 117, onValueChangeFinished = { Prefs.pillSleepHide.value = secs.toInt().toString() })
+            }
             Choices(listOf("off" to R.string.ov_style_off, "pill" to R.string.ov_style_pill, "bubble" to R.string.ov_style_bubble, "line" to R.string.ov_style_line, "curtain" to R.string.ov_style_curtain), overlay) { Prefs.overlay.value = it }
-            val dance by Prefs.danceMode.flow.collectAsState()
-            Text(stringResource(R.string.dance_mode), style = MaterialTheme.typography.bodyLarge)
-            Choices(listOf("steps" to R.string.dm_steps, "smooth" to R.string.dm_smooth), dance) { Prefs.danceMode.value = it }
             if (overlay == "pill") {
-                val pColor by Prefs.pillColor.flow.collectAsState()
+                val ev by Prefs.pillEvents.flow.collectAsState()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("Show only when something changes", "Sadece bir değişimde çıksın"), style = MaterialTheme.typography.bodyLarge)
+                        Hint(tr("The ring spins around the camera, the pill grows out to both sides, stays a while, then shrinks back into the camera.", "Halka kameranın etrafında döner, pill iki yana açılır, bir süre kalır, sonra kameraya doğru daralıp gider."))
+                    }
+                    Switch(ev == "1", { Prefs.pillEvents.value = if (it) "1" else "0" })
+                }
+                if (ev == "1") {
+                    val pHold by Prefs.pillHold.flow.collectAsState()
+                    var hold by remember { mutableFloatStateOf((pHold.toFloatOrNull() ?: 4f).coerceIn(1f, 15f)) }
+                    Text(tr("Stays open ${hold.toInt()} s", "Açık kalma süresi ${hold.toInt()} sn"), style = MaterialTheme.typography.bodyLarge)
+                    Slider(hold, { hold = it }, valueRange = 1f..15f, steps = 13, onValueChangeFinished = { Prefs.pillHold.value = hold.toInt().toString() })
+                }
+                val pBg by Prefs.pillBg.flow.collectAsState()
+                var bg by remember { mutableFloatStateOf((pBg.toFloatOrNull() ?: 100f).coerceIn(0f, 100f)) }
+                Text(tr("Pill background: ${bg.toInt()}% opaque", "Pill arka planı: %${bg.toInt()} opak"), style = MaterialTheme.typography.bodyLarge)
+                Slider(bg, { bg = it; Prefs.pillBg.value = it.toInt().toString() }, valueRange = 0f..100f)
+                val pAll by Prefs.pillAlpha.flow.collectAsState()
+                var all by remember { mutableFloatStateOf((pAll.toFloatOrNull() ?: 100f).coerceIn(10f, 100f)) }
+                Text(tr("Whole pill: ${all.toInt()}% opaque", "Tüm pill: %${all.toInt()} opak"), style = MaterialTheme.typography.bodyLarge)
+                Slider(all, { all = it; Prefs.pillAlpha.value = it.toInt().toString() }, valueRange = 10f..100f)
                 val pGap by Prefs.pillGap.flow.collectAsState()
-                val pOutfit by Prefs.pillOutfit.flow.collectAsState()
                 var gap by remember { mutableFloatStateOf((pGap.toFloatOrNull() ?: 1f).coerceIn(0f, 8f)) }
-                Text(stringResource(R.string.pill_color), style = MaterialTheme.typography.bodyLarge)
-                Choices(listOf("black" to R.string.pc_black, "white" to R.string.pc_white), pColor) { Prefs.pillColor.value = it }
                 Text(stringResource(R.string.pill_gap, gap.toInt()), style = MaterialTheme.typography.bodyLarge)
                 Slider(gap, { gap = it }, valueRange = 0f..8f, steps = 7, onValueChangeFinished = { Prefs.pillGap.value = gap.toInt().toString() })
-                Text(stringResource(R.string.pill_outfit), style = MaterialTheme.typography.bodyLarge)
-                Choices(listOf("none" to R.string.po_none, "wizard" to R.string.po_wizard, "crown" to R.string.po_crown, "party" to R.string.po_party, "bow" to R.string.po_bow, "cap" to R.string.po_cap, "phones" to R.string.po_phones, "halo" to R.string.po_halo, "ears" to R.string.po_ears, "shades" to R.string.po_shades, "santa" to R.string.po_santa), pOutfit) { Prefs.pillOutfit.value = it }
+                val pExtra by Prefs.pillExtra.flow.collectAsState()
+                var extra by remember { mutableFloatStateOf((pExtra.toFloatOrNull() ?: 5f).coerceIn(0f, 24f)) }
+                Text(tr("Pill length: +${extra.toInt()} px at each end", "Pill uzunluğu: her uçta +${extra.toInt()} px"), style = MaterialTheme.typography.bodyLarge)
+                Slider(extra, { extra = it }, valueRange = 0f..24f, onValueChangeFinished = { Prefs.pillExtra.value = extra.toInt().toString() })
+                Hint(tr("A longer pill gives the mascot and the >_ more room, but it covers more notification icons next to the camera. Lower it if icons get hidden.", "Uzun pill maskota ve >_ işaretine daha çok yer açar ama kameranın yanındaki bildirim ikonlarını daha çok kapatır. İkonlar kapanıyorsa azalt."))
             }
             if (!canOverlay && overlay != "off") {
                 Hint(stringResource(R.string.overlay_perm_sub))
@@ -294,7 +399,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 var sz by remember { mutableFloatStateOf((size.toFloatOrNull() ?: 72f).coerceIn(32f, 120f)) }
                 val style by Prefs.blackStyle.flow.collectAsState()
                 Choices(listOf("digital" to R.string.cs_digital, "stacked" to R.string.cs_stacked, "analog" to R.string.cs_analog, "ticks" to R.string.cs_ticks), style) { Prefs.blackStyle.value = it }
-                Choices(listOf("outfit" to R.string.font_outfit, "orbitron" to R.string.font_orbitron, "grotesk" to R.string.font_grotesk, "audiowide" to R.string.font_audiowide, "rajdhani" to R.string.font_rajdhani, "chakra" to R.string.font_chakra, "exo2i" to R.string.font_exo2i, "bungee" to R.string.font_bungee, "sharetech" to R.string.font_sharetech, "majormono" to R.string.font_majormono, "michroma" to R.string.font_michroma, "regular" to R.string.font_regular, "mono" to R.string.font_mono), if (font == "thin") "outfit" else font) { Prefs.blackFont.value = it }
+                FontPreviews(if (font == "thin") "outfit" else font) { Prefs.blackFont.value = it }
                 Text(stringResource(R.string.black_size, sz.toInt()), style = MaterialTheme.typography.bodyLarge)
                 Slider(sz, { sz = it }, valueRange = 32f..120f, onValueChangeFinished = { Prefs.blackSize.value = sz.toInt().toString() })
             }
@@ -315,6 +420,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                     trailingIcon = { IconButton({ pick = "cwd" }) { Icon(Icons.Filled.Folder, tr("Browse", "Gözat")) } })
                 OutlinedTextField(Prefs.attachDir.value, { Prefs.attachDir.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.attach_dir)) }, singleLine = true,
                     trailingIcon = { IconButton({ pick = "attach" }) { Icon(Icons.Filled.Folder, tr("Browse", "Gözat")) } })
+                SwitchRow(R.string.chat_notes, R.string.chat_notes_sub, Prefs.chatNotes.flow.collectAsState().value) { Prefs.chatNotes.value = it }
                 if (pick.isNotEmpty()) FolderPickerDialog(if (pick == "cwd") Prefs.cwd.value else Prefs.attachDir.value, { if (pick == "cwd") Prefs.cwd.value = it else Prefs.attachDir.value = it; pick = "" }, { pick = "" })
             }
             if (cat == "alive") Section(R.string.sec_keep) {
@@ -362,6 +468,30 @@ fun GuideScreen(onBack: () -> Unit) {
             CodeLine("adb shell \"/system/bin/device_config set_sync_disabled_for_tests persistent\"")
             CodeLine("adb shell \"/system/bin/device_config put activity_manager max_phantom_processes 2147483647\"")
             CodeLine("adb shell settings put global settings_enable_monitor_phantom_procs false")
+        }
+    }
+}
+
+/** One entry of the settings menu: tap to open that category; the description doubles as the search text. */
+private class SettingsCat(val key: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val title: String, val sub: String, val group: String, val keywords: String)
+
+/** The clock fonts shown as what they look like (the time written in each font), not as names. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FontPreviews(current: String, onPick: (String) -> Unit) {
+    val ctx = LocalContext.current
+    val keys = listOf("outfit", "orbitron", "grotesk", "audiowide", "rajdhani", "chakra", "exo2i", "bungee", "sharetech", "majormono", "michroma", "regular", "mono")
+    val fonts = remember { keys.associateWith { androidx.compose.ui.text.font.FontFamily(clockFont(ctx, it)) } }
+    val cs = MaterialTheme.colorScheme
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        keys.forEach { k ->
+            val on = current == k
+            Box(
+                Modifier.width(104.dp).height(56.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black)
+                    .border(if (on) 2.dp else 1.dp, if (on) cs.primary else cs.outlineVariant, RoundedCornerShape(12.dp))
+                    .clickable { onPick(k) },
+                contentAlignment = Alignment.Center
+            ) { Text("09:05", color = Color.White, fontSize = 22.sp, fontFamily = fonts[k], maxLines = 1) }
         }
     }
 }
