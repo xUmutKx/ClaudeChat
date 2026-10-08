@@ -87,7 +87,7 @@ private fun PulseDot(c: Color) {
 
 // ---------------------------------------------------------------- customize (tap the header mascot)
 
-val CHAT_BGS = listOf("none", "dusk", "mint", "rose", "sand", "grid", "stars", "dots", "ocean", "sunset", "lavender", "slate", "forest", "peach", "midnight", "graphite")
+val CHAT_BGS = listOf("none", "stars", "galaxy", "aurora", "waves")
 
 /** Chat-screen-only background; drawn behind the messages, never on the other screens. */
 @Composable
@@ -95,26 +95,66 @@ fun ChatBackground(modifier: Modifier = Modifier, style: String? = null) {
     val bg = style ?: Prefs.chatBg.flow.collectAsState().value
     val dark = MaterialTheme.colorScheme.background.let { (it.red + it.green + it.blue) / 3f < 0.5f }
     when (bg) {
-        "dusk" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF1B1633), Color(0xFF0E0B1C)) else listOf(Color(0xFFE6DFFF), Color(0xFFFFE3EC)))))
-        "mint" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF0F2A25), Color(0xFF0A1715)) else listOf(Color(0xFFD9F5EA), Color(0xFFF1FBF6)))))
-        "rose" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF2E1520), Color(0xFF170A10)) else listOf(Color(0xFFFFE0E8), Color(0xFFFFF4F1)))))
-        "sand" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF2A2218), Color(0xFF16120B)) else listOf(Color(0xFFF3E7D3), Color(0xFFFBF5EA)))))
-        "ocean" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF0E2A3F), Color(0xFF081821)) else listOf(Color(0xFFD4ECFA), Color(0xFFEEF8FD)))))
-        "sunset" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF3A1B2A), Color(0xFF1A0E14)) else listOf(Color(0xFFFFD9C2), Color(0xFFFFEFE6)))))
-        "lavender" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF24193A), Color(0xFF120D1E)) else listOf(Color(0xFFE9DEFA), Color(0xFFF7F2FD)))))
-        "slate" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF1E252B), Color(0xFF0F1316)) else listOf(Color(0xFFDDE4EA), Color(0xFFF3F6F8)))))
-        "forest" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF12281A), Color(0xFF09130D)) else listOf(Color(0xFFD3EBD6), Color(0xFFEEF8EF)))))
-        "peach" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF33211A), Color(0xFF190F0B)) else listOf(Color(0xFFFFE2CF), Color(0xFFFFF3EA)))))
-        "midnight" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF0A0F24), Color(0xFF04060F)) else listOf(Color(0xFFD6DCF5), Color(0xFFEDF0FB)))))
-        "graphite" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF1C1C1E), Color(0xFF0B0B0C)) else listOf(Color(0xFFE5E5E7), Color(0xFFF6F6F7)))))
-        "dots" -> Canvas(modifier) {
-            val step = 22.dp.toPx(); val col = (if (dark) Color.White else Color.Black).copy(alpha = .07f)
-            var y = step / 2; while (y < size.height) { var x = step / 2; while (x < size.width) { drawCircle(col, 1.6.dp.toPx(), Offset(x, y)); x += step }; y += step }
+        "galaxy" -> {
+            // a slowly turning spiral of stars with a soft nebula glow behind it
+            val clock = androidx.compose.animation.core.rememberInfiniteTransition(label = "galaxy")
+            val tm by clock.animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(60000, easing = androidx.compose.animation.core.LinearEasing)), label = "galaxyT")
+            Canvas(modifier) {
+                val c = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height * 0.42f)
+                val R = size.width.coerceAtLeast(size.height) * 0.9f
+                drawCircle(Brush.radialGradient(listOf(Color(if (dark) 0x553D2A8A else 0x33A88BFF), Color.Transparent), c, R * 0.6f), R * 0.6f, c)
+                for (i in 0 until 260) {
+                    val arm = i % 2
+                    val t = (i / 2f) / 130f                     // 0 at the centre, 1 at the rim
+                    val ang = arm * Math.PI + t * 4.2 * Math.PI + tm * 2 * Math.PI
+                    val rad = t * R * 0.5f * (0.85f + 0.3f * ((i * 37) % 100) / 100f)
+                    val x = c.x + (rad * Math.cos(ang)).toFloat(); val y = c.y + (rad * 0.55f * Math.sin(ang)).toFloat()
+                    val tw = 0.5f + 0.5f * kotlin.math.sin(2.0 * Math.PI * (tm * (1 + i % 3) + (i % 7) / 7f)).toFloat()
+                    val col = if (i % 4 == 0) Color(0xFFFFE8A3) else if (i % 3 == 0) Color(0xFF9EC9FF) else Color(0xFFD9C8FF)
+                    drawCircle(col.copy(alpha = 0.25f + 0.7f * tw), (0.8f + 1.4f * ((i * 13) % 10) / 10f).dp.toPx(), androidx.compose.ui.geometry.Offset(x, y))
+                }
+                drawCircle(Color(0xFFFFF4D6).copy(alpha = 0.9f), 3.dp.toPx(), c)
+            }
         }
-        "grid" -> Canvas(modifier) {
-            val step = 28.dp.toPx(); val c = (if (dark) Color.White else Color.Black).copy(alpha = .05f)
-            var x = 0f; while (x < size.width) { drawLine(c, Offset(x, 0f), Offset(x, size.height)); x += step }
-            var y = 0f; while (y < size.height) { drawLine(c, Offset(0f, y), Offset(size.width, y)); y += step }
+        "aurora" -> {
+            // soft bands of light that slide and bend
+            val clock = androidx.compose.animation.core.rememberInfiniteTransition(label = "aurora")
+            val tm by clock.animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(14000, easing = androidx.compose.animation.core.LinearEasing)), label = "auroraT")
+            Canvas(modifier) {
+                val cols = listOf(Color(0xFF3DDC97), Color(0xFF5B8CFF), Color(0xFFB36BFF))
+                for (b in 0 until 3) {
+                    val path = androidx.compose.ui.graphics.Path()
+                    val base = size.height * (0.18f + 0.22f * b)
+                    path.moveTo(0f, base)
+                    for (x in 0..40) {
+                        val fx = x / 40f
+                        val y = base + size.height * 0.07f * kotlin.math.sin(2 * Math.PI * (fx + tm + b * 0.3f)).toFloat() + size.height * 0.03f * kotlin.math.sin(2 * Math.PI * (fx * 2 - tm)).toFloat()
+                        path.lineTo(fx * size.width, y)
+                    }
+                    path.lineTo(size.width, 0f); path.lineTo(0f, 0f); path.close()
+                    drawPath(path, Brush.verticalGradient(listOf(cols[b].copy(alpha = if (dark) 0.35f else 0.25f), Color.Transparent), 0f, base + size.height * 0.1f))
+                }
+            }
+        }
+        "waves" -> {
+            // three rolling lines of water
+            val clock = androidx.compose.animation.core.rememberInfiniteTransition(label = "waves")
+            val tm by clock.animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(8000, easing = androidx.compose.animation.core.LinearEasing)), label = "wavesT")
+            Canvas(modifier) {
+                val cols = listOf(Color(0xFF4FC3F7), Color(0xFF29B6F6), Color(0xFF0288D1))
+                for (b in 0 until 3) {
+                    val path = androidx.compose.ui.graphics.Path()
+                    val base = size.height * (0.55f + 0.14f * b)
+                    path.moveTo(0f, size.height)
+                    for (x in 0..60) {
+                        val fx = x / 60f
+                        val y = base + size.height * 0.035f * kotlin.math.sin(2 * Math.PI * (fx * (2 + b) + tm * (1 + b * 0.5f) + b * 0.2f)).toFloat()
+                        path.lineTo(fx * size.width, y)
+                    }
+                    path.lineTo(size.width, size.height); path.close()
+                    drawPath(path, cols[b].copy(alpha = if (dark) 0.16f else 0.12f))
+                }
+            }
         }
         "stars" -> {
             // sharp four-pointed stars, yellow and white, each twinkling at its own pace
@@ -192,7 +232,7 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                     Mascot(false, Modifier.size(24.dp, 16.dp), idle = true)
                 }
             }
-            PreviewTiles(listOf("none" to tr("None", "Yok"), "dusk" to tr("Dusk", "Alacakaranlık"), "mint" to tr("Mint", "Nane"), "rose" to tr("Rose", "Gül"), "sand" to tr("Sand", "Kum"), "grid" to tr("Grid", "Izgara"), "stars" to tr("Stars", "Yıldızlar"), "dots" to tr("Dots", "Noktalar"), "ocean" to tr("Ocean", "Okyanus"), "sunset" to tr("Sunset", "Gün batımı"), "lavender" to tr("Lavender", "Lavanta"), "slate" to tr("Slate", "Arduvaz"), "forest" to tr("Forest", "Orman"), "peach" to tr("Peach", "Şeftali"), "midnight" to tr("Midnight", "Gece yarısı"), "graphite" to tr("Graphite", "Grafit")), bg, { Prefs.chatBg.value = it }) { k ->
+            PreviewTiles(listOf("none" to tr("None", "Yok"), "stars" to tr("Stars", "Yıldızlar"), "galaxy" to tr("Galaxy", "Galaksi"), "aurora" to tr("Aurora", "Kuzey ışığı"), "waves" to tr("Waves", "Dalgalar")), bg, { Prefs.chatBg.value = it }, 46, 46) { k ->
                 Box(Modifier.fillMaxSize()) {
                     ChatBackground(Modifier.fillMaxSize(), style = k)
                     Box(Modifier.padding(start = 26.dp, top = 12.dp).size(24.dp, 7.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = .35f)))
@@ -214,11 +254,11 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
 
 /** Tiles that show the option itself (no caption). The name is only read out by screen readers. */
 @Composable
-private fun PreviewTiles(items: List<Pair<String, String>>, current: String, onPick: (String) -> Unit, tile: @Composable (String) -> Unit) {
+private fun PreviewTiles(items: List<Pair<String, String>>, current: String, onPick: (String) -> Unit, tileW: Int = 64, tileH: Int = 52, tile: @Composable (String) -> Unit) {
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { (k, name) ->
             val on = current == k
-            Box(Modifier.size(64.dp, 52.dp).clip(RoundedCornerShape(14.dp))
+            Box(Modifier.size(tileW.dp, tileH.dp).clip(RoundedCornerShape(14.dp))
                 .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
                 .clickable { onPick(k) }
                 .semantics { contentDescription = name }, contentAlignment = Alignment.Center) { tile(k) }

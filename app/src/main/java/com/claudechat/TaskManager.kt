@@ -164,9 +164,11 @@ class BuildState(val ok: Boolean, val failed: Boolean, val running: Boolean, val
 /** The build's elapsed seconds, counting up every second between two polls of the bridge. */
 @Composable
 fun liveElapsed(b: BuildState?): Int {
+    // the clock ticks on its own while the build runs; it does not depend on the (new) state object of each poll
+    val running = b?.running == true
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
-    val fetched = remember(b) { System.currentTimeMillis() }
-    LaunchedEffect(b?.running) { while (b?.running == true) { delay(1000); now = System.currentTimeMillis() } }
+    LaunchedEffect(running) { while (running) { delay(1000); now = System.currentTimeMillis() } }
+    val fetched = remember(b?.elapsed) { System.currentTimeMillis() }
     return if (b == null || b.elapsed < 0) -1 else b.elapsed + ((now - fetched) / 1000).toInt().coerceAtLeast(0)
 }
 

@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 /** The mascot's looks (Settings / tap the header mascot): hat or accessory, body colour. Shared by the pill, bubble, notification, status-bar icon and chat header. */
 object Outfit {
     val ALL = listOf("none", "wizard", "crown", "party", "bow", "cap", "phones", "halo", "ears", "shades", "santa",
-        "tophat", "pirate", "chef", "cowboy", "beanie", "viking", "devil", "antlers", "bunny", "ninja", "sprout", "flower", "unicorn", "propeller", "knight", "graduate", "detective", "witch", "hardhat", "mushroom")
+        "tophat", "pirate", "chef", "cowboy", "beanie", "viking", "devil", "antlers", "bunny", "ninja", "sprout", "flower", "unicorn", "propeller", "knight", "graduate", "detective", "witch", "hardhat", "mushroom", "astronaut", "pumpkin", "fez", "tiara")
 
     fun hat(name: String = Prefs.pillOutfit.value): Int = when (name) {
         "wizard" -> R.drawable.ic_hat_wizard
@@ -37,6 +37,10 @@ object Outfit {
         "detective" -> R.drawable.ic_hat_detective
         "witch" -> R.drawable.ic_hat_witch
         "hardhat" -> R.drawable.ic_hat_hardhat
+        "astronaut" -> R.drawable.ic_cos_astronaut
+        "pumpkin" -> R.drawable.ic_cos_pumpkin
+        "fez" -> R.drawable.ic_cos_fez
+        "tiara" -> R.drawable.ic_cos_tiara
         "mushroom" -> R.drawable.ic_hat_mushroom
         else -> 0
     }
