@@ -13,6 +13,8 @@ Claude Chat is Claude Code on Android. The real `claude` CLI runs on your phone,
   <img src="docs/screenshots/settings.png" width="200" alt="Settings">
   <img src="docs/screenshots/customize.png" width="200" alt="Customize the mascot">
   <img src="docs/screenshots/black-screen.png" width="200" alt="Black screen">
+  <img src="docs/screenshots/chat-galaxy.png" width="200" alt="Chat with the galaxy background">
+  <img src="docs/screenshots/usage.png" width="200" alt="Usage and limits with the build timer">
 </p>
 
 ## What it does
