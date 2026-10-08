@@ -158,8 +158,20 @@ private val BUILD_STEPS = listOf(
     Triple("Package", Regex(":package\\w*|:createReleaseApkListingFileRedirect|:validateSigning|:assemble"), 11),
 )
 
-/** Where a Gradle build is: percentage, the step it is in and its name, worked out from the log text. */
-class BuildState(val ok: Boolean, val failed: Boolean, val running: Boolean, val pct: Int, val reached: Int, val last: String, val project: String)
+/** Where a Gradle build is: the step it is in, how long it has been running (or took) and its name, worked out from the log text. No percentage: Gradle does not report one. */
+class BuildState(val ok: Boolean, val failed: Boolean, val running: Boolean, val elapsed: Int, val took: String, val reached: Int, val last: String, val project: String)
+
+/** The build's elapsed seconds, counting up every second between two polls of the bridge. */
+@Composable
+fun liveElapsed(b: BuildState?): Int {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    val fetched = remember(b) { System.currentTimeMillis() }
+    LaunchedEffect(b?.running) { while (b?.running == true) { delay(1000); now = System.currentTimeMillis() } }
+    return if (b == null || b.elapsed < 0) -1 else b.elapsed + ((now - fetched) / 1000).toInt().coerceAtLeast(0)
+}
+
+/** 83 -> "1:23", 3725 -> "1:02:05"; -1 (unknown) -> "". */
+fun clockText(sec: Int): String = if (sec < 0) "" else if (sec >= 3600) "%d:%02d:%02d".format(sec / 3600, sec / 60 % 60, sec % 60) else "%d:%02d".format(sec / 60, sec % 60)
 
 fun buildState(l: Triple<String, Int, String>): BuildState? {
     val text = l.third
@@ -168,10 +180,9 @@ fun buildState(l: Triple<String, Int, String>): BuildState? {
     if (!ok && !failed && !running) return null
     val tasks = Regex("> Task (:\\S+)").findAll(text).map { it.groupValues[1] }.toList()
     val reached = BUILD_STEPS.indexOfLast { s -> tasks.any { s.second.containsMatchIn(it) } || (s.first == "Configure" && text.contains("Configure project")) }
-    val total = BUILD_STEPS.sumOf { it.third }
-    val done = if (ok) total else BUILD_STEPS.take(reached.coerceAtLeast(0)).sumOf { it.third } + if (reached >= 0) BUILD_STEPS[reached].third / 2 else 0
-    val pct = if (ok) 100 else (100 * done / total).coerceIn(0, 99)
-    return BuildState(ok, failed, running, pct, reached, tasks.lastOrNull().orEmpty(), l.first.substringAfterLast('/'))
+    // Gradle's own last line says how long a finished build took ("BUILD SUCCESSFUL in 14m 35s")
+    val took = Regex("BUILD (?:SUCCESSFUL|FAILED) in ([^\\n]+)").find(text)?.groupValues?.get(1)?.trim().orEmpty()
+    return BuildState(ok, failed, running, if (running) Engine.buildElapsedFor(l.first) else -1, took, reached, tasks.lastOrNull().orEmpty(), l.first.substringAfterLast('/'))
 }
 
 /** Slim progress bar above the message box while a build runs: step name and percentage, tap opens the details. */
@@ -182,12 +193,13 @@ fun BuildBar(onOpen: () -> Unit) {
     LaunchedEffect(Unit) { while (true) { st = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Engine.buildLog()?.let { buildState(it) } }; delay(3000) } }
     val b = st ?: return
     if (!b.running) return
+    val el = liveElapsed(b)
     Column(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 18.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(tr("Build", "Derleme") + " · " + b.project.removeSuffix(".log").removeSuffix("_build"), fontSize = 12.sp, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1)
-            Text((BUILD_STEPS.getOrNull(b.reached)?.first ?: "…") + "  " + b.pct + "%", fontSize = 12.sp, color = cs.primary)
+            Text((BUILD_STEPS.getOrNull(b.reached)?.first ?: "…") + (if (el >= 0) "  ·  " + clockText(el) else ""), fontSize = 12.sp, color = cs.primary)
         }
-        LinearProgressIndicator({ b.pct / 100f }, Modifier.fillMaxWidth().padding(top = 3.dp).height(3.dp).clip(RoundedCornerShape(2.dp)), color = cs.primary)
+        LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 3.dp).height(3.dp).clip(RoundedCornerShape(2.dp)), color = cs.primary)
     }
 }
 
@@ -199,14 +211,18 @@ fun BuildCard() {
     LaunchedEffect(Unit) { while (true) { log = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Engine.buildLog() }; delay(2000) } }
     val l = log ?: return
     val b = buildState(l) ?: return
-    val ok = b.ok; val failed = b.failed; val running = b.running; val pct = b.pct; val reached = b.reached; val last = b.last; val proj = b.project; val text = l.third
+    val el = liveElapsed(b)
+    val ok = b.ok; val failed = b.failed; val running = b.running; val reached = b.reached; val last = b.last; val proj = b.project; val text = l.third
     Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceContainer) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(tr("Build", "Derleme"), fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Text(if (failed) tr("failed", "başarısız") else if (ok) "100%" else "%$pct", fontSize = 22.sp, color = if (failed) Color(0xFFF44336) else if (ok) Color(0xFF4CAF50) else cs.primary)
+                Text(
+                    if (failed) tr("failed", "başarısız") + (if (b.took.isNotEmpty()) " · ${b.took}" else "") else if (ok) tr("done", "bitti") + (if (b.took.isNotEmpty()) " · ${b.took}" else "") else clockText(el).ifEmpty { "…" },
+                    fontSize = 22.sp, color = if (failed) Color(0xFFF44336) else if (ok) Color(0xFF4CAF50) else cs.primary)
             }
-            LinearProgressIndicator({ pct / 100f }, Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)), color = if (failed) Color(0xFFF44336) else cs.primary)
+            if (running) LinearProgressIndicator(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)), color = cs.primary)
+            else LinearProgressIndicator({ 1f }, Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)), color = if (failed) Color(0xFFF44336) else Color(0xFF4CAF50))
             BUILD_STEPS.forEachIndexed { i, s ->
                 val state = if (ok || i < reached) 2 else if (i == reached) (if (failed) 3 else 1) else 0
                 Row(verticalAlignment = Alignment.CenterVertically) {

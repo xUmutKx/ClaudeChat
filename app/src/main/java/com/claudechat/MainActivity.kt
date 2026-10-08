@@ -12,7 +12,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 
@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        if (Prefs.keepAlive.value || Prefs.overlay.value != "off" || Vib.anyBuild()) KeepAliveService.start(this)
+        if (Prefs.keepAlive.value || Prefs.overlay.value != "off" || Prefs.buddyOn.value || Vib.anyBuild()) KeepAliveService.start(this)
         setContent {
             ClaudeTheme {
                 val dark = isDarkTheme()
@@ -36,7 +36,9 @@ class MainActivity : ComponentActivity() {
                 }
                 var screen by rememberSaveable { mutableStateOf("chat") }
                 BackHandler(screen != "chat") { screen = if (screen == "guide" || screen == "setup" || screen == "tasks") "settings" else "chat" }
-                Crossfade(screen, label = "screen") {
+                // going deeper slides in from the right, going back from the left (like the system settings), not a blind cross-fade
+                fun depth(s: String) = when (s) { "chat" -> 0; "settings", "chats" -> 1; else -> 2 }
+                AnimatedContent(screen, transitionSpec = { pageSlide(depth(targetState) - depth(initialState)) }, label = "screen") {
                     when (it) {
                         "settings" -> SettingsScreen({ screen = "chat" }, { screen = "guide" }, { recreate() }, { screen = "setup" }, { screen = "tasks" })
                         "guide" -> GuideScreen { screen = "settings" }

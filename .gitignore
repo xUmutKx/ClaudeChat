@@ -6,3 +6,4 @@ local.properties
 .nomedia
 tools/patch_*.py
 tools_*.py
+build_*.log

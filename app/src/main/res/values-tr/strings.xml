@@ -242,6 +242,7 @@
     <string name="font_majormono">Major Mono</string>
     <string name="font_michroma">Michroma (geniş)</string>
     <string name="ov_style_bubble">Yüzen balon</string>
+    <string name="ov_style_buddy">Arkadaş</string>
     <string name="po_cap">Şapka</string>
     <string name="po_phones">Kulaklık</string>
     <string name="po_halo">Hale</string>
@@ -249,4 +250,12 @@
     <string name="po_shades">Gözlük</string>
     <string name="po_santa">Noel şapkası</string>
     <string name="err_dropped">Köprüyle bağlantı koptu. Claude hâlâ çalışıyor olabilir; sohbeti yeniden aç ya da Bağlan\'a bas.</string>
+    <string name="pill_access_desc">Claude Chat\'in durum hapını ve buddy\'yi bildirim panelinin ve Ayarlar ekranlarının üstüne çizmesini sağlar. Ekranındaki hiçbir şeyi okumaz.</string>
+    <string name="sec_ai">Diğer yapay zekâlar</string>
+    <string name="studio_on">Stüdyo: resim ve pixel art</string>
+    <string name="studio_on_sub">Yapay zekâ sohbette doğrudan görünen bir SVG resim ya da pixel art ile cevap verir; kaydet ve paylaş düğmeleri olur.</string>
+    <string name="agent_on">Yapay zekâ dosya ve komut kullansın</string>
+    <string name="agent_on_sub">Claude Code gibi: aşağıdaki klasörde dosya okuyabilir, arayabilir, düzenleyebilir ve komut çalıştırabilir.</string>
+    <string name="agent_root">Komutlarını root olarak çalıştır</string>
+    <string name="agent_root_sub">Telefonun kendi kabuğu için (cihazda root gerekir).</string>
 </resources>

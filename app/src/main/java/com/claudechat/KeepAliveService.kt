@@ -53,7 +53,8 @@ object Notifier {
 class KeepAliveService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var wl: PowerManager.WakeLock? = null
-    private lateinit var overlay: Overlay
+    internal lateinit var overlay: Overlay
+    // (internal for relayout)
     private var stopJob: Job? = null
 
     override fun attachBaseContext(b: Context) = super.attachBaseContext(b.localized())
@@ -64,6 +65,7 @@ class KeepAliveService : Service() {
         Notifier.channels(this)
         startFg(getString(R.string.status_idle))
         overlay = Overlay(applicationContext)
+        live = this
         scope.launch(Dispatchers.IO) { // a Gradle build the bridge sees finishes or fails: vibrate in the user's pattern
             var seen = ""
             while (true) {
@@ -92,7 +94,7 @@ class KeepAliveService : Service() {
             while (true) {
                 if (Prefs.autoStart.value && !Engine.overall.value.running) {
                     if (Engine.ping() == 200) fails = 0
-                    else if (++fails >= 2) { fails = 0; Termux.startBridge(applicationContext) }
+                    else if (++fails >= 4) { fails = 0; Termux.startBridge(applicationContext, kill = false) }
                 }
                 delay(20_000)
             }
@@ -106,15 +108,28 @@ class KeepAliveService : Service() {
             ).collect { overlay.refreshBlack() }
         }
         scope.launch { // pill look changed (colour, gap, outfit): rebuild it
-            kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { }, Prefs.pillEvents.flow.map { }, Prefs.pillHold.flow.map { })
-                .drop(6).collect { overlay.onRotate(); startFg(fgText, fgWorking ?: false) }
+            kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillExtra.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { }, Prefs.pillEvents.flow.map { }, Prefs.pillHold.flow.map { }, Prefs.pillHandle.flow.map { })
+                .drop(7).collect { overlay.onRotate(); startFg(fgText, fgWorking ?: false) }
+        }
+        scope.launch { // the buddy was switched on or off, or the mascot moved house (pill <-> buddy): draw both again
+            kotlinx.coroutines.flow.merge(Prefs.buddyOn.flow.map { }, Prefs.mascotHome.flow.map { }).drop(2).collect {
+                if (Prefs.buddyOn.value && !Prefs.keepAlive.value) KeepAliveService.start(applicationContext)
+                overlay.redraw()
+            }
         }
         scope.launch { // opacity: no rebuild, just redraw
             kotlinx.coroutines.flow.merge(Prefs.pillBg.flow.map { }, Prefs.pillAlpha.flow.map { }).drop(2).collect { overlay.refreshOpacity() }
         }
+        scope.launch { // buddy look changed: rebuild it with the same state
+            kotlinx.coroutines.flow.merge(Prefs.buddySize.flow.map { }, Prefs.buddyOpacity.flow.map { }, Prefs.buddyBubble.flow.map { },
+                Prefs.buddyBubbleSize.flow.map { }, Prefs.buddyBubbleWidth.flow.map { }, Prefs.buddyBubbleLines.flow.map { }, Prefs.buddyBubbleOpacity.flow.map { },
+                Prefs.buddyBubbleShape.flow.map { }, Prefs.buddyBubbleTone.flow.map { }, Prefs.buddyTail.flow.map { }, Prefs.buddyGravity.flow.map { },
+                Prefs.buddyBlanket.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.mascotSkin.flow.map { }).drop(14).collect { overlay.buddy.refresh() }
+        }
         scope.launch { Engine.demoShell.collect { overlay.redraw(); startFg(fgText, fgWorking ?: false) } }
         scope.launch { Engine.shell.collect { startFg(fgText, fgWorking ?: false) } }
-        scope.launch { Prefs.mascotSkin.flow.collect { overlay.redraw() } }
+        scope.launch { Prefs.mascotSkin.flow.collect { overlay.redraw(); startFg(fgText, fgWorking ?: false) } }
+        scope.launch { kotlinx.coroutines.flow.merge(Prefs.mascotChar.flow.map { }, Prefs.provider.flow.map { }).drop(2).collect { overlay.redraw(); overlay.buddy.refresh(); startFg(fgText, fgWorking ?: false) } }
         scope.launch { combine(AppState.foreground, Engine.demoShell) { fg, demo -> fg && !demo }.collect { overlay.setQuiet(it) } } // the shell preview also shows on the pill // chat open: its header mascot shows the status, so the pill hides
     }
 
@@ -143,7 +158,7 @@ class KeepAliveService : Service() {
             wl?.release(); wl = null
         }
         stopJob?.cancel()
-        if (!s.keep && !s.st.running && s.style == "off" && !Vib.anyBuild()) {
+        if (!s.keep && !s.st.running && s.style == "off" && !Prefs.buddyOn.value && !Vib.anyBuild()) {
             stopJob = scope.launch { delay(12_000); stopSelf() }
         }
     }
@@ -163,14 +178,22 @@ class KeepAliveService : Service() {
             val hat = Outfit.hat()
             val ids = if (pc) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2) else if (working) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2, R.id.m3 to R.id.h3, R.id.m4 to R.id.h4) else listOf(R.id.m1 to R.id.h1)
             if (Prefs.showNotifMascot.value != "1") ids.forEach { (m, h) -> setViewVisibility(m, android.view.View.GONE); setViewVisibility(h, android.view.View.GONE) }
-            else ids.forEach { (m, h) ->
-                if (hat != 0) { if (!pc) setImageViewResource(m, R.drawable.ic_mascot18); setImageViewResource(h, hat); setViewVisibility(h, android.view.View.VISIBLE) }
+            else {
+                // a notification only takes pictures: the face in its colour, the blanket when idle (asleep, like the pill and the header) and the hat fitted, in one
+                val asleep = layout == R.layout.notif_still && lastSt == Status.Idle
+                val blanket = asleep && Prefs.buddyBlanket.value == "1"
+                ids.forEachIndexed { i, (m, h) ->
+                    val faces = if (pc) Mascots.pc(i == 1)
+                        else listOf(if (asleep) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18))
+                    setImageViewBitmap(m, Mascots.bitmap(this@KeepAliveService, faces, hat, blanket))
+                    setViewVisibility(h, android.view.View.GONE)
+                }
             }
         }
     }
 
     private fun startFg(text: String, working: Boolean = false) {
-        val outfit = Prefs.pillOutfit.value + Prefs.showNotifMascot.value + atComputer()
+        val outfit = Prefs.pillOutfit.value + Prefs.showNotifMascot.value + atComputer() + (lastSt == Status.Idle) + Mascots.current() + Prefs.mascotSkin.value + Prefs.buddyBlanket.value
         if (text == fgText && fgWorking == working && fgOutfit == outfit) return // identical: do not re-post the notification
         fgText = text; fgWorking = working; fgOutfit = outfit
         val n = NotificationCompat.Builder(this, Notifier.CH_KEEP)
@@ -205,12 +228,16 @@ class KeepAliveService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        live = null
         overlay.hide()
         wl?.release(); wl = null
         super.onDestroy()
     }
 
     companion object {
+        @Volatile private var live: KeepAliveService? = null
+        /** The accessibility layer came or went: rebuild the pill and the buddy on the right window layer. */
+        fun relayout(c: Context) { live?.let { s -> android.os.Handler(android.os.Looper.getMainLooper()).post { s.overlay.relayout() } } }
         const val ACTION_STOP = "com.claudechat.STOP"
         fun start(c: Context) {
             try { ContextCompat.startForegroundService(c, Intent(c, KeepAliveService::class.java)) } catch (e: Exception) { }

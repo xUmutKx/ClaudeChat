@@ -109,7 +109,7 @@ private fun Recorder(onDone: (String) -> Unit) {
                 }
             }
         }, contentAlignment = Alignment.Center) {
-        Text(if (down) tr("Buzzing…", "Titriyor…") else if (segs.isEmpty()) tr("Tap your rhythm here (hold = long buzz)", "Ritmini buraya vur (basılı tut = uzun titreşim)") else tr("Recording… stop to save", "Kaydediyor… bırakınca kaydedilir"),
+        Text(if (down) tr("Buzzing…", "Titriyor…") else if (segs.isEmpty()) tr("Your rhythm", "Ritmin") else tr("Recording… stop to save", "Kaydediyor… bırakınca kaydedilir"),
             color = if (down) cs.onPrimary else cs.onPrimaryContainer, fontSize = 13.sp)
     }
 }

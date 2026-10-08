@@ -2,6 +2,8 @@ package com.claudechat
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,6 +15,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
@@ -88,8 +91,8 @@ val CHAT_BGS = listOf("none", "dusk", "mint", "rose", "sand", "grid", "stars", "
 
 /** Chat-screen-only background; drawn behind the messages, never on the other screens. */
 @Composable
-fun ChatBackground(modifier: Modifier = Modifier) {
-    val bg by Prefs.chatBg.flow.collectAsState()
+fun ChatBackground(modifier: Modifier = Modifier, style: String? = null) {
+    val bg = style ?: Prefs.chatBg.flow.collectAsState().value
     val dark = MaterialTheme.colorScheme.background.let { (it.red + it.green + it.blue) / 3f < 0.5f }
     when (bg) {
         "dusk" -> Box(modifier.background(Brush.verticalGradient(if (dark) listOf(Color(0xFF1B1633), Color(0xFF0E0B1C)) else listOf(Color(0xFFE6DFFF), Color(0xFFFFE3EC)))))
@@ -157,10 +160,12 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
             Text(tr("Customize", "Özelleştir"), fontFamily = FontFamily.Serif, fontSize = 24.sp)
             // every state side by side, so the blue "shell is running" look can be checked without waiting for one
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
-                StatePreview(tr("Idle", "Boşta")) { Mascot(false, Modifier.size(64.dp, 46.dp), sleeping = true) }
-                StatePreview(tr("Working", "Çalışıyor")) { Mascot(true, Modifier.size(64.dp, 46.dp)) }
-                StatePreview(tr("Shell", "Komut")) { Mascot(true, Modifier.size(64.dp, 46.dp), computer = true) }
+                StatePreview(tr("Idle", "Boşta")) { Mascot(false, Modifier.size(54.dp, 39.dp), idle = true) }
+                StatePreview(tr("Working", "Çalışıyor")) { Mascot(true, Modifier.size(54.dp, 39.dp)) }
+                StatePreview(tr("Shell", "Komut")) { Mascot(true, Modifier.size(54.dp, 39.dp), computer = true) }
+                StatePreview(tr("Sleep", "Uyku")) { Mascot(false, Modifier.size(54.dp, 39.dp), sleeping = true) }
             }
+            CharacterPicker()
             Label(tr("Outfit", "Kıyafet"))
             OutfitPicker(outfit) { Prefs.pillOutfit.value = it }
             Label(tr("Scene", "Ortam"))
@@ -176,17 +181,68 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                 Outfit.SKINS.forEach { k ->
                     Box(Modifier.size(34.dp).clip(CircleShape).background(Color(Outfit.SKIN_SWATCH[k] ?: 0xFFD97757))
                         .then(if (skin == k) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
-                        .clickable { Prefs.mascotSkin.value = k })
+                        .clickable { Mascots.setSkin(Mascots.current(), k) })
                 }
             }
             Label(tr("Animation", "Animasyon"))
             Chips(listOf("steps" to tr("Frame by frame", "Kare kare"), "smooth" to tr("Smooth", "Akıcı")), dance) { Prefs.danceMode.value = it }
-            Label(tr("Pill colour", "Pill rengi"))
-            Chips(listOf("black" to tr("Black", "Siyah"), "white" to tr("White", "Beyaz")), pill) { Prefs.pillColor.value = it }
-            Label(tr("Chat background (main chat screen only)", "Sohbet arka planı (yalnızca ana sohbet ekranı)"))
-            Chips(listOf("none" to tr("None", "Yok"), "dusk" to tr("Dusk", "Alacakaranlık"), "mint" to tr("Mint", "Nane"), "rose" to tr("Rose", "Gül"), "sand" to tr("Sand", "Kum"), "grid" to tr("Grid", "Izgara"), "stars" to tr("Stars", "Yıldızlar"), "dots" to tr("Dots", "Noktalar"), "ocean" to tr("Ocean", "Okyanus"), "sunset" to tr("Sunset", "Gün batımı"), "lavender" to tr("Lavender", "Lavanta"), "slate" to tr("Slate", "Arduvaz"), "forest" to tr("Forest", "Orman"), "peach" to tr("Peach", "Şeftali"), "midnight" to tr("Midnight", "Gece yarısı"), "graphite" to tr("Graphite", "Grafit")), bg) { Prefs.chatBg.value = it }
-            Label(tr("Message bubbles", "Mesaj balonları"))
-            Chips(listOf("soft" to tr("Soft", "Yumuşak"), "round" to tr("Round", "Yuvarlak"), "square" to tr("Square", "Köşeli"), "outline" to tr("Outline", "Çerçeve")), bubble) { Prefs.bubbleStyle.value = it }
+            // previews only, no captions: each tile is the thing itself
+            PreviewTiles(listOf("black" to tr("Black", "Siyah"), "white" to tr("White", "Beyaz")), pill, { Prefs.pillColor.value = it }) { k ->
+                Box(Modifier.size(54.dp, 20.dp).clip(RoundedCornerShape(10.dp)).background(if (k == "white") Color(0xFFF2F2F5) else Color(0xFF111114)), contentAlignment = Alignment.Center) {
+                    Mascot(false, Modifier.size(24.dp, 16.dp), idle = true)
+                }
+            }
+            PreviewTiles(listOf("none" to tr("None", "Yok"), "dusk" to tr("Dusk", "Alacakaranlık"), "mint" to tr("Mint", "Nane"), "rose" to tr("Rose", "Gül"), "sand" to tr("Sand", "Kum"), "grid" to tr("Grid", "Izgara"), "stars" to tr("Stars", "Yıldızlar"), "dots" to tr("Dots", "Noktalar"), "ocean" to tr("Ocean", "Okyanus"), "sunset" to tr("Sunset", "Gün batımı"), "lavender" to tr("Lavender", "Lavanta"), "slate" to tr("Slate", "Arduvaz"), "forest" to tr("Forest", "Orman"), "peach" to tr("Peach", "Şeftali"), "midnight" to tr("Midnight", "Gece yarısı"), "graphite" to tr("Graphite", "Grafit")), bg, { Prefs.chatBg.value = it }) { k ->
+                Box(Modifier.fillMaxSize()) {
+                    ChatBackground(Modifier.fillMaxSize(), style = k)
+                    Box(Modifier.padding(start = 26.dp, top = 12.dp).size(24.dp, 7.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = .35f)))
+                    Box(Modifier.padding(start = 10.dp, top = 24.dp).size(24.dp, 9.dp).clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.primaryContainer))
+                }
+            }
+            PreviewTiles(listOf("soft" to tr("Soft", "Yumuşak"), "round" to tr("Round", "Yuvarlak"), "square" to tr("Square", "Köşeli"), "outline" to tr("Outline", "Çerçeve")), bubble, { Prefs.bubbleStyle.value = it }) { k ->
+                val shape = RoundedCornerShape(when (k) { "round" -> 16.dp; "square" -> 3.dp; else -> 10.dp })
+                Column(Modifier.padding(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.size(30.dp, 6.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .4f)))
+                    Box(Modifier.align(Alignment.End).size(40.dp, 14.dp).clip(shape)
+                        .background(when (k) { "round" -> MaterialTheme.colorScheme.primaryContainer; "outline" -> Color.Transparent; else -> MaterialTheme.colorScheme.surfaceContainerHigh })
+                        .then(if (k == "outline") Modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape) else Modifier))
+                }
+            }
+        }
+    }
+}
+
+/** Tiles that show the option itself (no caption). The name is only read out by screen readers. */
+@Composable
+private fun PreviewTiles(items: List<Pair<String, String>>, current: String, onPick: (String) -> Unit, tile: @Composable (String) -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items.forEach { (k, name) ->
+            val on = current == k
+            Box(Modifier.size(64.dp, 52.dp).clip(RoundedCornerShape(14.dp))
+                .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
+                .clickable { onPick(k) }
+                .semantics { contentDescription = name }, contentAlignment = Alignment.Center) { tile(k) }
+        }
+    }
+}
+
+/** The characters, shown as pictures (no names, no explanations), each in its own colour. The first one, "A", follows whichever AI answers. */
+@Composable
+fun CharacterPicker() {
+    val chosen by Prefs.mascotChar.flow.collectAsState()
+    Prefs.provider.flow.collectAsState().value; Prefs.mascotSkins.flow.collectAsState().value   // redraw when the AI or a colour changes
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        (listOf("auto") + Mascots.IDS).forEach { c ->
+            val on = chosen == c
+            val who = if (c == "auto") Mascots.current() else c
+            val tint = remember(who, Prefs.mascotSkins.value) { Mascots.tint(who)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
+            Box(Modifier.size(58.dp, 54.dp).clip(RoundedCornerShape(14.dp))
+                .background(if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest)
+                .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
+                .clickable { Mascots.pick(c) }, contentAlignment = Alignment.Center) {
+                Image(painterResource(Mascots.preview(who)), null, Modifier.size(44.dp, 40.dp), colorFilter = tint)
+                if (c == "auto") Icon(Icons.Filled.AutoAwesome, null, Modifier.align(Alignment.TopEnd).padding(3.dp).size(13.dp), tint = MaterialTheme.colorScheme.primary)
+            }
         }
     }
 }
@@ -194,7 +250,7 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
 @Composable
 private fun StatePreview(label: String, content: @Composable () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(78.dp, 62.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) { content() }
+        Box(Modifier.size(70.dp, 58.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) { content() }
         Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
     }
 }
@@ -262,17 +318,29 @@ private const val FULL_SETUP =
     "pkg update -y && pkg install -y proot-distro && proot-distro install ubuntu && " +
         "proot-distro login ubuntu -- bash -lc 'apt update && apt install -y curl nodejs npm git && npm install -g @anthropic-ai/claude-code'"
 
-/** Step-by-step setup for someone who never installed Termux: get Termux, allow Claude Chat, install Ubuntu + Claude, log in. */
+/**
+ * Step by step for someone who never installed Termux: get Termux (downloaded in here), one short paste that installs Ubuntu + Claude Code
+ * and starts the connection, sign in through the phone's browser (no codes to copy), optionally GitHub, then pick the project folder.
+ */
 @Composable
 fun SetupScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val clip = LocalClipboardManager.current
     val bridge by Engine.bridge.collectAsState()
     val tick = remember { mutableStateOf(0) }
+    var auth by remember { mutableStateOf<Engine.Auth?>(null) }
+    var pickFolder by remember { mutableStateOf(false) }
+    var folderChosen by rememberSaveable { mutableStateOf(false) }
+    var showFull by remember { mutableStateOf(false) }
+    var cmd by remember { mutableStateOf(SetupServer.command().orEmpty()) }
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(2000); tick.value++; if (Termux.installed(ctx)) Engine.checkBridge() } }
+    LaunchedEffect(bridge) { while (bridge == 200) { auth = Engine.authStatus(); kotlinx.coroutines.delay(6000) } }
     val installed = remember(tick.value) { Termux.installed(ctx) }
     val granted = remember(tick.value) { Termux.granted(ctx) }
+    // the system asks once whether Claude Chat may run commands in Termux; Termux opens right after, whatever the answer
+    val perm = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { Termux.openTermux(ctx) }
     val cs = MaterialTheme.colorScheme
+    val up = bridge == 200
 
     Column(Modifier.fillMaxSize().background(cs.background).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -280,10 +348,10 @@ fun SetupScreen(onBack: () -> Unit) {
             Text(tr("Set up Claude on this phone", "Claude'u bu telefona kur"), fontFamily = FontFamily.Serif, fontSize = 22.sp)
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(tr("Three steps, once. Each step turns green when it is done.", "Üç adım, bir kez. Biten adım yeşile döner."), color = cs.onSurfaceVariant)
+            Text(tr("Once, in a few steps. Each step turns green when it is done.", "Bir kez, birkaç adımda. Biten adım yeşile döner."), color = cs.onSurfaceVariant)
             val dl by TermuxInstall.state.collectAsState()
             Step(1, tr("Get Termux (downloaded inside this app)", "Termux'u al (uygulamanın içinden iner)"), installed,
-                tr("Termux is open source. Claude Chat downloads it from its GitHub release and opens Android's installer. You may be asked to allow installing from this app once.", "Termux açık kaynaklıdır. Claude Chat onu GitHub sürümünden indirir ve Android'in kurucusunu açar. Bir kez bu uygulamadan kurulum iznini isteyebilir.")) {
+                tr("Termux is open source. Claude Chat downloads it from its GitHub release and opens Android's installer. You may be asked to allow installing from this app once.", "Termux açık kaynaklıdır. Claude Chat onu GitHub sürümünden indirir ve Android'in kurucusunu açar. Bir kez bu uygulamadan kurmaya izin vermen istenebilir.")) {
                 when (val d = dl) {
                     is TermuxInstall.State.Idle, is TermuxInstall.State.Failed -> {
                         Button({ TermuxInstall.start(ctx) }, enabled = !installed) { Text(tr("Download Termux", "Termux'u indir")) }
@@ -297,20 +365,98 @@ fun SetupScreen(onBack: () -> Unit) {
                     is TermuxInstall.State.Ready -> Button({ TermuxInstall.install(ctx, d.file) }, enabled = !installed) { Text(tr("Install Termux", "Termux'u kur")) }
                 }
             }
-            Step(2, tr("Set everything up with one paste", "Tek yapıştırmayla her şeyi kur"), bridge == 200,
-                tr("This one command lets Claude Chat control Termux, installs Ubuntu and installs Claude Code. It takes a few minutes and needs internet. Tap the button, then long-press in Termux and choose Paste.", "Bu tek komut Claude Chat'in Termux'u yönetmesine izin verir, Ubuntu'yu ve Claude Code'u kurar. Birkaç dakika sürer, internet ister. Düğmeye dokun, sonra Termux'ta basılı tutup Yapıştır'ı seç.")) {
-                Cmd(ALL_IN_ONE, clip)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button({ clip.setText(AnnotatedString(ALL_IN_ONE)); Termux.openTermux(ctx) }, enabled = installed) { Text(tr("Copy and open Termux", "Kopyala ve Termux'u aç")) }
-                    OutlinedButton({ ctx.requestTermuxPermission() }, enabled = installed && !granted) { Text(tr("Grant permission", "İzin ver")) }
+            Step(2, tr("One paste sets everything up", "Tek yapıştırma her şeyi kurar"), up,
+                tr("Tap the button: it copies one short line and opens Termux. Long-press in Termux, choose Paste, press Enter. It installs Ubuntu and Claude Code, then starts the connection. The first time takes a few minutes; later it only repairs.",
+                    "Düğmeye bas: kısa bir satırı kopyalar ve Termux'u açar. Termux'ta basılı tut, Yapıştır'ı seç, Enter'a bas. Ubuntu'yu ve Claude Code'u kurar, sonra bağlantıyı başlatır. İlk seferde birkaç dakika sürer; sonra sadece onarır.")) {
+                if (cmd.isNotEmpty()) Cmd(cmd, clip) else Text(tr("Could not prepare the line.", "Satır hazırlanamadı."), color = cs.error, fontSize = 12.sp)
+                Button({
+                    cmd = SetupServer.command().orEmpty()   // a fresh code each time: the line only works for a few minutes
+                    clip.setText(AnnotatedString(cmd))
+                    if (installed && !granted) perm.launch(Termux.PERM) else Termux.openTermux(ctx)
+                }, enabled = installed && cmd.isNotEmpty()) { Text(tr("Copy and open Termux", "Kopyala ve Termux'u aç")) }
+                if (up) Text(tr("Connected.", "Bağlandı."), color = Color(0xFF4CAF50), fontSize = 13.sp)
+                else Text(tr("Waiting for the connection… (this screen notices by itself)", "Bağlantı bekleniyor… (bu ekran kendiliğinden fark eder)"), color = cs.onSurfaceVariant, fontSize = 12.sp)
+                TextButton({ showFull = !showFull }) { Text(if (showFull) tr("Hide the long command", "Uzun komutu gizle") else tr("Show the long command instead", "Bunun yerine uzun komutu göster")) }
+                if (showFull) Cmd(ALL_IN_ONE, clip)
+            }
+            SignInStep(3, "claude", tr("Sign in to Claude", "Claude'a giriş yap"),
+                tr("Your browser opens Claude's sign-in page. Approve there and come back: nothing to copy.", "Tarayıcın Claude'un giriş sayfasını açar. Orada onayla ve geri dön: kopyalanacak bir şey yok."),
+                auth?.claudeIn == true, auth?.email.orEmpty(), up, tr("Sign in with the browser", "Tarayıcıyla giriş yap")) { scopeAuth -> auth = scopeAuth }
+            SignInStep(4, "gh", tr("GitHub (optional)", "GitHub (isteğe bağlı)"),
+                tr("Lets Claude push and pull for you. GitHub shows a short code: it is copied for you, paste it on the page that opens.", "Claude'un senin için push/pull yapmasını sağlar. GitHub kısa bir kod gösterir: senin için kopyalanır, açılan sayfaya yapıştır."),
+                auth?.ghIn == true, auth?.ghUser.orEmpty(), up && auth?.ghInstalled != false, tr("Sign in to GitHub", "GitHub'a giriş yap")) { scopeAuth -> auth = scopeAuth }
+            Step(5, tr("Pick your project folder", "Proje klasörünü seç"), folderChosen,
+                tr("Claude works inside this folder. You can change it later in Settings.", "Claude bu klasörün içinde çalışır. Sonra Ayarlar'dan değiştirebilirsin.")) {
+                Text(Prefs.cwd.flow.collectAsState().value, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                OutlinedButton({ pickFolder = true }, enabled = up) { Text(tr("Choose folder", "Klasör seç")) }
+                Button(onBack, enabled = up && auth?.claudeIn == true) { Text(tr("Start chatting", "Sohbete başla")) }
+            }
+            if (up && auth?.claudeIn == true) Text(tr("All set. Say hi!", "Hazır. Merhaba de!"), color = Color(0xFF4CAF50), fontWeight = FontWeight.Medium)
+        }
+    }
+    if (pickFolder) FolderPickerDialog(Prefs.cwd.value, { Prefs.cwd.value = it; folderChosen = true; pickFolder = false }, { pickFolder = false })
+}
+
+/** Opens a web page on the phone. */
+private fun openUrl(ctx: android.content.Context, url: String) {
+    try { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { }
+}
+
+/**
+ * A sign-in step: the bridge runs `claude auth login` / `gh auth login`, which open their page through $BROWSER; the link comes here and opens in the
+ * phone's browser. Claude's answer returns over localhost by itself; GitHub shows a short code, which is copied for the user.
+ */
+@Composable
+private fun SignInStep(n: Int, what: String, title: String, body: String, signedIn: Boolean, who: String, enabled: Boolean, button: String, onAuth: (Engine.Auth?) -> Unit) {
+    val ctx = LocalContext.current
+    val clip = LocalClipboardManager.current
+    val cs = MaterialTheme.colorScheme
+    var run by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf<Engine.Login?>(null) }
+    var opened by remember { mutableStateOf("") }
+    var copied by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(run) {
+        if (!run) return@LaunchedEffect
+        opened = ""; copied = ""; info = Engine.login(what, "start")
+        val t0 = System.currentTimeMillis()
+        while (System.currentTimeMillis() - t0 < 5 * 60_000L) {
+            kotlinx.coroutines.delay(1000)
+            val v = Engine.login(what, "state") ?: continue
+            info = v
+            if (v.code.isNotEmpty() && copied != v.code) { copied = v.code; clip.setText(AnnotatedString(v.code)) }
+            if (v.url.isNotEmpty() && opened != v.url) { opened = v.url; openUrl(ctx, v.url) }
+            if (v.state == "done" || v.state == "error" || v.state == "cancelled") break
+        }
+        run = false
+        onAuth(Engine.authStatus())
+    }
+    Step(n, title, signedIn, body) {
+        if (signedIn) {
+            Text(tr("Signed in", "Giriş yapıldı") + if (who.isNotEmpty()) " · $who" else "", color = Color(0xFF4CAF50), fontSize = 13.sp)
+            OutlinedButton({ run = true }, enabled = enabled && !run) { Text(tr("Sign in again", "Yeniden giriş yap")) }
+        } else if (!run) {
+            Button({ run = true }, enabled = enabled) { Text(button) }
+            info?.takeIf { it.state == "error" }?.let { Text(it.out.takeLast(200), fontSize = 12.sp, color = cs.error) }
+            if (!enabled) Text(tr("Needs the connection from step 2 first.", "Önce 2. adımdaki bağlantı gerekir."), fontSize = 12.sp, color = cs.onSurfaceVariant)
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp))
+                Text(if (info?.url.isNullOrEmpty()) tr("Getting the sign-in page…", "Giriş sayfası hazırlanıyor…") else tr("Finish in the browser, then come back.", "Tarayıcıda bitir, sonra geri dön."))
+            }
+            info?.code?.takeIf { it.isNotEmpty() }?.let { c ->
+                Surface(shape = RoundedCornerShape(12.dp), color = cs.surfaceContainerHighest) {
+                    Row(Modifier.padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(c, Modifier.weight(1f).padding(vertical = 10.dp), fontFamily = FontFamily.Monospace, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        IconButton({ clip.setText(AnnotatedString(c)) }) { Icon(Icons.Filled.ContentCopy, tr("Copy", "Kopyala")) }
+                    }
                 }
+                Text(tr("Copied. Paste it on the GitHub page.", "Kopyalandı. GitHub sayfasına yapıştır."), fontSize = 12.sp, color = cs.onSurfaceVariant)
             }
-            Step(3, tr("Log in to Claude", "Claude'a giriş yap"), bridge == 200,
-                tr("In Termux run the line below, follow the login link it prints, then close it. After this the chat works.", "Termux'ta aşağıdaki satırı çalıştır, çıkan giriş bağlantısını izle, sonra kapat. Bundan sonra sohbet çalışır.")) {
-                Cmd("proot-distro login ubuntu -- claude", clip)
-                Button({ Engine.connect() }, enabled = installed) { Text(tr("Start Claude", "Claude'u başlat")) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton({ info?.url?.takeIf { it.isNotEmpty() }?.let { openUrl(ctx, it) } }, enabled = !info?.url.isNullOrEmpty()) { Text(tr("Open the page again", "Sayfayı yeniden aç")) }
+                TextButton({ run = false; scope.launch { Engine.login(what, "cancel") } }) { Text(tr("Cancel", "İptal")) }
             }
-            if (bridge == 200) Text(tr("All set — go back and say hi.", "Hazır — geri dön ve merhaba de."), color = Color(0xFF4CAF50), fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -364,8 +510,8 @@ private fun OutfitPicker(selected: String, onPick: (String) -> Unit) {
                 .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
                 .clickable { onPick(k) }, contentAlignment = Alignment.Center) {
                 Box(Modifier.size(50.dp, 45.dp)) {
-                    Image(painterResource(R.drawable.ic_mascot18), null, Modifier.fillMaxSize(), colorFilter = tint)
-                    val h = Outfit.hat(k); if (h != 0) Image(painterResource(h), null, Modifier.fillMaxSize())
+                    Image(painterResource(Mascots.r(R.drawable.ic_mascot18)), null, Modifier.fillMaxSize(), colorFilter = tint)
+                    val h = Outfit.hat(k); if (h != 0) Image(painterResource(h), null, Modifier.fillMaxSize().hatFit())
                 }
             }
         }
@@ -392,8 +538,8 @@ private fun ScenePicker() {
                     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = (Prefs.sceneDim.flow.collectAsState().value.toIntOrNull() ?: 35) / 100f)))
                 }
                 Box(Modifier.size(50.dp, 45.dp)) {
-                    Image(painterResource(R.drawable.ic_mascot18), null, Modifier.fillMaxSize(), colorFilter = tint)
-                    val h = Outfit.hat(outfit); if (h != 0) Image(painterResource(h), null, Modifier.fillMaxSize())
+                    Image(painterResource(Mascots.r(R.drawable.ic_mascot18)), null, Modifier.fillMaxSize(), colorFilter = tint)
+                    val h = Outfit.hat(outfit); if (h != 0) Image(painterResource(h), null, Modifier.fillMaxSize().hatFit())
                 }
             }
         }
@@ -409,7 +555,6 @@ fun AboutCard() {
     val code = remember { try { androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(ctx.packageManager.getPackageInfo(ctx.packageName, 0)) } catch (e: Exception) { 0L } }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         PlayMascot(Modifier.fillMaxWidth().height(280.dp))
-        Text(tr("Press and hold the mascot, then drag and fling it", "Maskota basılı tut, sonra sürükle ve fırlat"), fontSize = 11.sp, color = cs.onSurfaceVariant)
         Text("Claude Chat", fontFamily = FontFamily.Serif, fontSize = 28.sp)
         Text("by UmutK", fontSize = 16.sp, color = cs.primary, fontWeight = FontWeight.Medium)
         Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceContainer) {

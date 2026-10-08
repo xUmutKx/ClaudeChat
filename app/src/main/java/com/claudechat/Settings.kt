@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.border
 import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -14,7 +15,15 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -116,6 +125,15 @@ fun Choices(options: List<Pair<String, Int>>, selected: String, onSelect: (Strin
     }
 }
 
+/** Like [Choices], with ready-made labels (English or Turkish through tr()). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TextChoices(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { (v, label) -> FilterChip(selected == v, { onSelect(v) }, { Text(label) }) }
+    }
+}
+
 @Composable
 private fun SwitchRow(title: Int, sub: Int?, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -156,6 +174,7 @@ private fun rememberTick(): Int {
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, onSetup: () -> Unit = {}, onTasks: () -> Unit = {}) {
     val ctx = LocalContext.current
+    val clip = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val tick = rememberTick()
     val theme by Prefs.theme.flow.collectAsState()
@@ -184,6 +203,8 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             "bridge termux port token connect köprü anahtar"),
         SettingsCat("claude", Icons.Filled.Build, tr("Claude", "Claude"), tr("Permissions and folders", "İzinler ve klasörler"), tr("Claude", "Claude"),
             "permission mode working folder attachment folder notes izin modu çalışma klasörü ek klasörü"),
+        SettingsCat("ai", Icons.Filled.AutoAwesome, tr("Other AIs & Studio", "Diğer yapay zekâlar ve Stüdyo"), tr("Gemini, DeepSeek, Groq, OpenRouter; pictures and pixel art", "Gemini, DeepSeek, Groq, OpenRouter; resim ve pixel art"), tr("Claude", "Claude"),
+            "ai gemini deepseek groq openrouter mistral openai key api studio svg pixel art picture image yapay zeka anahtar resim"),
         SettingsCat("usage", Icons.Filled.Memory, tr("Usage & limits", "Kullanım ve limitler"), tr("5-hour and weekly limits, builds, CPU and memory", "5 saatlik ve haftalık limit, derleme, CPU, bellek"), tr("Claude", "Claude"),
             "usage limits five hour weekly build progress cpu memory resources kullanım limit derleme kaynak"),
         SettingsCat("tasks", Icons.Filled.QueryStats, tr("Task manager", "Görev yöneticisi"), tr("Running chats and commands", "Çalışan sohbetler ve komutlar"), tr("Claude", "Claude"),
@@ -202,7 +223,9 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             "version author github sürüm yapımcı"),
     )
     Page(R.string.settings, { if (cat.isNotEmpty()) cat = "" else onBack() }) {
-        if (cat.isEmpty()) {
+        AnimatedContent(cat, transitionSpec = { pageSlide(if (targetState.isNotEmpty() && initialState.isEmpty()) 1 else if (targetState.isEmpty()) -1 else 0).using(SizeTransform(clip = false) { _, _ -> snap() }) }, label = "settingsPage") { sc ->
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (sc.isEmpty()) {
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text(tr("Search settings", "Ayarlarda ara")) },
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
                 trailingIcon = { if (query.isNotEmpty()) IconButton({ query = "" }) { Icon(Icons.Filled.Close, tr("Clear", "Temizle")) } })
@@ -226,14 +249,14 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 }
             }
             if (shown.isEmpty()) Hint(tr("Nothing matches.", "Eşleşen ayar yok."))
-        } else cats.firstOrNull { it.key == cat }?.let { c ->
+        } else cats.firstOrNull { it.key == sc }?.let { c ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(c.icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(12.dp))
                 Text(c.title, style = MaterialTheme.typography.titleLarge)
             }
         }
-        if (cat == "conn") Section(R.string.sec_method) {
+        if (sc == "conn") Section(R.string.sec_method) {
             val up = bridge == 200
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(if (up) statusColor(Status.Done) else statusColor(Status.Error)))
@@ -243,13 +266,18 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             Button({
                 scope.launch {
                     bridge = -2
-                    // one tap does everything: grants Termux permission through root (silently ignored without root), then starts the bridge
+                    // one tap does everything: asks the system once for the right to run commands in Termux, grants it through root when there is root, then starts the bridge
+                    if (Termux.installed(ctx) && !Termux.granted(ctx)) permLauncher.launch(Termux.PERM)
                     withContext(Dispatchers.IO) { Termux.rootSetup() }
                     Termux.startBridge(ctx)?.let { bridge = -1; det = true; return@launch }
                     repeat(75) { kotlinx.coroutines.delay(1000); val p = Engine.ping(); if (p == 200) { bridge = p; return@launch } }
                     bridge = -1; det = true
                 }
             }, Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(if (up) R.string.start_bridge else R.string.connect_now)) }
+            OutlinedButton({
+                SetupServer.command()?.let { clip.setText(AnnotatedString(it)); Termux.openTermux(ctx) }
+            }, Modifier.fillMaxWidth()) { Text(tr("Repair the connection (paste once in Termux)", "Bağlantıyı onar (Termux'a bir kez yapıştır)")) }
+            Hint(tr("If starting from here does not work, this copies one short line: paste it in Termux and everything is set up again.", "Buradan başlatma çalışmazsa bu, kısa bir satır kopyalar: Termux'a yapıştır, her şey yeniden kurulur."))
             if (bridge == 401) Hint(stringResource(R.string.bridge_401))
             if (!up && Termux.log.isNotBlank()) Hint(Termux.log.trim().takeLast(400))
 
@@ -288,7 +316,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             SwitchRow(R.string.auto_start, null, auto) { Prefs.autoStart.value = it }
         }
 
-        if (cat == "usage") Section(R.string.sec_usage) {
+        if (sc == "usage") Section(R.string.sec_usage) {
             val p = limits.split("|")
             val rows = listOf(R.string.lim_five to 0, R.string.lim_week to 2)
             if (p.size < 4 || p[0].isEmpty() && p[2].isEmpty()) Hint(stringResource(R.string.lim_none))
@@ -306,19 +334,19 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
         }
 
 
-        if (cat == "about") AboutCard()
+        if (sc == "about") AboutCard()
 
-        if (cat == "vibe") VibeSettings()
-        if (cat == "tasks") { LaunchedEffect(Unit) { cat = ""; onTasks() } }
+        if (sc == "vibe") VibeSettings()
+        if (sc == "tasks") { LaunchedEffect(Unit) { cat = ""; onTasks() } }
 
-        if (cat == "usage") { BuildCard(); UsageCard() }
+        if (sc == "usage") { BuildCard(); UsageCard() }
 
-        if (cat == "look") Section(R.string.sec_appearance) {
+        if (sc == "look") Section(R.string.sec_appearance) {
             Choices(listOf("system" to R.string.theme_system, "light" to R.string.theme_light, "dark" to R.string.theme_dark, "amoled" to R.string.theme_amoled), theme) { Prefs.theme.value = it }
             Choices(listOf("en" to R.string.lang_en, "tr" to R.string.lang_tr), lang) { if (it != lang) { Prefs.lang.value = it; onLang() } }
         }
 
-        if (cat == "overlay") Section(R.string.sec_overlay) {
+        if (sc == "overlay") Section(R.string.sec_overlay) {
             val sleepHide by Prefs.pillSleepHide.flow.collectAsState()
             val headerOn by Prefs.showHeaderMascot.flow.collectAsState()
             val scenePill by Prefs.sceneInPill.flow.collectAsState()
@@ -367,19 +395,55 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 var gap by remember { mutableFloatStateOf((pGap.toFloatOrNull() ?: 1f).coerceIn(0f, 8f)) }
                 Text(stringResource(R.string.pill_gap, gap.toInt()), style = MaterialTheme.typography.bodyLarge)
                 Slider(gap, { gap = it }, valueRange = 0f..8f, steps = 7, onValueChangeFinished = { Prefs.pillGap.value = gap.toInt().toString() })
-                val pExtra by Prefs.pillExtra.flow.collectAsState()
-                var extra by remember { mutableFloatStateOf((pExtra.toFloatOrNull() ?: 5f).coerceIn(0f, 24f)) }
-                Text(tr("Pill length: +${extra.toInt()} px at each end", "Pill uzunluğu: her uçta +${extra.toInt()} px"), style = MaterialTheme.typography.bodyLarge)
-                Slider(extra, { extra = it }, valueRange = 0f..24f, onValueChangeFinished = { Prefs.pillExtra.value = extra.toInt().toString() })
-                Hint(tr("A longer pill gives the mascot and the >_ more room, but it covers more notification icons next to the camera. Lower it if icons get hidden.", "Uzun pill maskota ve >_ işaretine daha çok yer açar ama kameranın yanındaki bildirim ikonlarını daha çok kapatır. İkonlar kapanıyorsa azalt."))
+                val pExt by Prefs.pillExtra.flow.collectAsState()
+                var ext by remember { mutableFloatStateOf((pExt.toFloatOrNull() ?: 0f).coerceIn(0f, 200f)) }
+                Text(tr("Extra pill length at each end: ${ext.toInt()} px", "Pill ekstra uzatma (her uç): ${ext.toInt()} px"), style = MaterialTheme.typography.bodyLarge)
+                Slider(ext, { ext = it }, valueRange = 0f..200f, onValueChangeFinished = { Prefs.pillExtra.value = ext.toInt().toString() })
+                val pBub by Prefs.pillBubble.flow.collectAsState()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(tr("Show pill messages as a speech bubble", "Pill mesajlarını konuşma balonu olarak göster"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Switch(pBub == "1", { Prefs.pillBubble.value = if (it) "1" else "0" })
+                }
+                Hint(tr("The bubble opens under the pill. Its size, hold time and opacity are the buddy bubble settings.", "Balon pill'in altında açılır. Boyutu, kalma süresi ve saydamlığı buddy balonu ayarlarıdır."))
+                val strip by Prefs.pillHandle.flow.collectAsState()
+                Text(tr("Touch strip under the pill", "Pill'in altındaki dokunma şeridi"), style = MaterialTheme.typography.bodyLarge)
+                TextChoices(listOf("1" to tr("On, invisible", "Açık, görünmez"), "2" to tr("On, show it", "Açık, göster"), "0" to tr("Off", "Kapalı")), strip) { Prefs.pillHandle.value = it }
+                Hint(tr("The pill sits over the status bar, where touches often never arrive. This strip right under it takes a tap (opens the chat bubble) and lets you pull the mascot out of the pill with a drag. It covers a thin band at the top of the app below, so turn it off if it gets in the way.",
+                    "Pill durum çubuğunun üstünde durur ve dokunma çoğu zaman oraya ulaşmaz. Hemen altındaki bu şerit dokunmayı alır (sohbet balonunu açar) ve maskotu sürükleyerek pill'den çıkarmanı sağlar. Altındaki uygulamanın üstünden ince bir bant kaplar; engel olursa kapat."))
             }
+            run {
+                val buddyOn by Prefs.buddyOn.flow.collectAsState()
+                val home by Prefs.mascotHome.flow.collectAsState()
+                Text(tr("Floating buddy", "Yüzen buddy"), style = MaterialTheme.typography.titleSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("Show the buddy", "Buddy'yi göster"), style = MaterialTheme.typography.bodyLarge)
+                        Hint(tr("The mascot walks around on top of every app. It works next to the pill.", "Maskot her uygulamanın üstünde dolaşır. Pill ile birlikte çalışır."))
+                    }
+                    Switch(buddyOn, { Prefs.buddyOn.value = it; if (!it) Prefs.mascotHome.value = "pill" })
+                }
+                if (buddyOn && overlay == "pill") {
+                    Text(tr("The mascot lives in", "Maskot şurada yaşar"), style = MaterialTheme.typography.bodyLarge)
+                    TextChoices(listOf("pill" to tr("The pill", "Pill"), "buddy" to tr("The buddy", "Buddy"), "both" to tr("Both", "İkisi birlikte")), home) { Prefs.mascotHome.value = it }
+                    Hint(tr("There is one mascot: it is either in the pill or walking around. Pull it out of the pill with a drag from the strip under it; let the buddy go on the pill or the strip to put it back.",
+                        "Tek maskot var: ya pill'in içinde ya da dolaşıyor. Altındaki şeritten sürükleyerek pill'den çıkar; buddy'yi pill'in ya da şeridin üstünde bırakınca geri girer."))
+                }
+            }
+            if (Prefs.buddyOn.flow.collectAsState().value) BuddySettings()
             if (!canOverlay && overlay != "off") {
                 Hint(stringResource(R.string.overlay_perm_sub))
                 Button({ ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))) }) { Text(stringResource(R.string.grant)) }
             }
+            val accOn = remember(tick, PillAccess.instance) { PillAccess.enabled(ctx) }
+            Text(tr("Above everything: " + if (accOn) "on" else "off", "Her şeyin üstünde: " + if (accOn) "açık" else "kapalı"), style = MaterialTheme.typography.bodyLarge)
+            Hint(tr("With the accessibility layer on, the pill and the buddy stay above the notification shade and over Settings screens. It reads nothing on your screen.", "Erişilebilirlik katmanı açıkken pill ve buddy bildirim panelinin ve Ayarlar ekranlarının üstünde kalır. Ekranındaki hiçbir şeyi okumaz."))
+            if (!accOn) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button({ Thread { PillAccess.enableWithRoot() }.start() }) { Text(tr("Turn on (root)", "Aç (root)")) }
+                OutlinedButton({ ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text(tr("Open settings", "Ayarları aç")) }
+            }
         }
 
-        if (cat == "black") Section(R.string.sec_black) {
+        if (sc == "black") Section(R.string.sec_black) {
             val dim by Prefs.blackDim.flow.collectAsState()
             val bClock by Prefs.blackClock.flow.collectAsState()
             val bDate by Prefs.blackDate.flow.collectAsState()
@@ -412,7 +476,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
         }
 
         run {
-            if (cat == "claude") Section(R.string.sec_claude) {
+            if (sc == "claude") Section(R.string.sec_claude) {
                 Text(stringResource(R.string.perm_mode))
                 Choices(listOf("default" to R.string.mode_default, "acceptEdits" to R.string.mode_edits, "plan" to R.string.mode_plan, "bypassPermissions" to R.string.mode_bypass), mode) { Prefs.mode.value = it }
                 var pick by remember { mutableStateOf("") } // "cwd" / "attach": which field the folder picker fills
@@ -423,13 +487,93 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 SwitchRow(R.string.chat_notes, R.string.chat_notes_sub, Prefs.chatNotes.flow.collectAsState().value) { Prefs.chatNotes.value = it }
                 if (pick.isNotEmpty()) FolderPickerDialog(if (pick == "cwd") Prefs.cwd.value else Prefs.attachDir.value, { if (pick == "cwd") Prefs.cwd.value = it else Prefs.attachDir.value = it; pick = "" }, { pick = "" })
             }
-            if (cat == "alive") Section(R.string.sec_keep) {
+            if (sc == "ai") Section(R.string.sec_ai) {
+                val prov by Prefs.provider.flow.collectAsState()
+                val cfgTick by Prefs.provCfg.flow.collectAsState()
+                Text(tr("Who answers in new messages", "Yeni mesajlara kim cevap versin"), style = MaterialTheme.typography.bodyLarge)
+                TextChoices(Providers.all.map { it.id to it.name }, prov) { Providers.select(it) }
+                val p = Providers.byId(prov)
+                Hint(tr(p.note, p.noteTr))
+                if (p.id != "claude") {
+                    androidx.compose.runtime.key(p.id) {
+                        var k by remember(p.id) { mutableStateOf(Providers.key(p.id)) }
+                        var m by remember(p.id) { mutableStateOf(Providers.model(p)) }
+                        var b by remember(p.id) { mutableStateOf(Providers.base(p)) }
+                        if (p.needsKey || p.id == "custom" || p.id == "ollama") OutlinedTextField(k, { k = it; Providers.set(p.id, "key", it) }, Modifier.fillMaxWidth(), label = { Text(tr("API key", "API anahtarı")) }, singleLine = true,
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                        if (p.auth == "gh") {
+                            var who by remember { mutableStateOf<Engine.Auth?>(null) }
+                            LaunchedEffect(Unit) { who = Engine.authStatus() }
+                            Hint(if (who?.ghIn == true) tr("Signed in to GitHub as ${who?.ghUser}.", "GitHub'a giriş yapıldı: ${who?.ghUser}.") else tr("Not signed in to GitHub yet.", "GitHub'a henüz giriş yapılmadı."))
+                            if (who?.ghIn != true) Button(onSetup) { Text(tr("Sign in to GitHub", "GitHub'a giriş yap")) }
+                        }
+                        OutlinedTextField(m, { m = it; Providers.set(p.id, "model", it) }, Modifier.fillMaxWidth(), label = { Text(tr("Model", "Model")) }, singleLine = true)
+                        if (p.id == "custom" || p.id == "ollama" || p.base.isEmpty()) OutlinedTextField(b, { b = it; Providers.set(p.id, "base", it) }, Modifier.fillMaxWidth(), label = { Text(tr("Server address (…/v1)", "Sunucu adresi (…/v1)")) }, singleLine = true)
+                        if (p.id != "claude" && p.id != "custom" || Providers.base(p).isNotEmpty()) {
+                            var browse by remember { mutableStateOf(false) }
+                            OutlinedButton({ browse = true }, Modifier.fillMaxWidth()) { Text(tr("Browse all models", "Tüm modellere göz at")) }
+                            if (browse) ModelBrowser(p, { browse = false }) { m = it; Providers.set(p.id, "model", it); browse = false }
+                        }
+                        if (p.models.isNotEmpty()) {
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                p.models.forEach { mn -> FilterChip(m == mn, { m = mn; Providers.set(p.id, "model", mn) }, { Text(mn) }) }
+                            }
+                        }
+                        if (p.id == "ollama") {
+                            val scope = rememberCoroutineScope()
+                            var installed by remember { mutableStateOf<List<String>?>(null) }
+                            var status by remember { mutableStateOf("") }
+                            var busy by remember { mutableStateOf(false) }
+                            val http = remember { okhttp3.OkHttpClient.Builder().connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS).readTimeout(0, java.util.concurrent.TimeUnit.SECONDS).build() }
+                            fun refresh() { scope.launch(kotlinx.coroutines.Dispatchers.IO) { installed = Providers.ollamaModels(http); if (installed == null) status = tr("Ollama is not reachable at that address.", "Ollama bu adreste yok.") } }
+                            LaunchedEffect(Unit) { refresh() }
+                            Text(tr("Installed models (tap to use)", "Yüklü modeller (kullanmak için dokun)"), style = MaterialTheme.typography.bodyLarge)
+                            val inst = installed
+                            if (inst != null && inst.isEmpty()) Hint(tr("Nothing installed yet. Pick one below and download it.", "Henüz yüklü model yok. Aşağıdan seçip indir."))
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                inst.orEmpty().forEach { mn -> FilterChip(m == mn, { m = mn; Providers.set(p.id, "model", mn) }, { Text(mn) }) }
+                            }
+                            Button({
+                                busy = true; status = tr("Starting…", "Başlıyor…")
+                                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    val err = Providers.ollamaPull(http, m) { status = it }
+                                    status = err ?: tr("Downloaded: $m", "İndirildi: $m"); busy = false; refresh()
+                                }
+                            }, enabled = !busy && m.isNotBlank()) { Text(tr("Download $m", "$m indir")) }
+                            if (status.isNotEmpty()) Hint(status)
+                            Hint(tr("Ollama must be running: in Termux/Ubuntu install it and run: ollama serve. Small models (1–4B) fit a phone; bigger ones belong on a computer: set its address above.", "Ollama çalışıyor olmalı: Termux/Ubuntu'da kur ve şunu çalıştır: ollama serve. Küçük modeller (1–4B) telefona sığar; büyükleri bilgisayarda çalıştırıp adresini yukarıya yaz."))
+                        }
+                        if (p.keyUrl.isNotEmpty()) TextButton({ ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(p.keyUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text(tr("Get a key", "Anahtar al")) }
+                    }
+                    Hint(tr("Other AIs only chat: they cannot touch files or run commands on your phone. The key stays on this phone and goes only to that provider. The mascot changes colour so you can see who is answering.", "Diğer yapay zekâlar sadece sohbet eder: telefonunda dosyaya dokunamaz, komut çalıştıramaz. Anahtar bu telefonda kalır ve sadece o sağlayıcıya gider. Kimin cevap verdiğini görmen için maskot renk değiştirir."))
+                }
+                Text(tr("Mascot", "Maskot"), style = MaterialTheme.typography.bodyLarge)
+                CharacterPicker()
+                if (prov != "claude") {
+                    SwitchRow(R.string.agent_on, R.string.agent_on_sub, Prefs.agentTools.flow.collectAsState().value) { Prefs.agentTools.value = it }
+                    if (Prefs.agentTools.flow.collectAsState().value) {
+                        OutlinedTextField(Prefs.agentDir.value, { Prefs.agentDir.value = it }, Modifier.fillMaxWidth(), label = { Text(tr("Folder the AI may work in", "Yapay zekânın çalışabileceği klasör")) }, singleLine = true)
+                        SwitchRow(R.string.agent_root, R.string.agent_root_sub, Prefs.agentRoot.flow.collectAsState().value) { Prefs.agentRoot.value = it }
+                        if (!android.os.Environment.isExternalStorageManager()) {
+                            Hint(tr("Files on shared storage need 'All files access'.", "Ortak depolamadaki dosyalar için 'Tüm dosyalara erişim' gerekir."))
+                            Button({ ctx.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text(tr("Allow all files", "Tüm dosyalara izin ver")) }
+                        }
+                        Hint(tr("It works inside this folder only, with no bridge: reading and searching are free; writing asks you in the default mode, commands always ask unless the mode is 'bypass'. Plan mode is read-only.", "Sadece bu klasörde çalışır, köprü gerekmez: okuma ve arama serbest; yazma varsayılan modda sorar, komutlar 'bypass' modu değilse her zaman sorar. Plan modu salt okunurdur."))
+                    }
+                }
+                SwitchRow(R.string.studio_on, R.string.studio_on_sub, Prefs.studio.flow.collectAsState().value) { Prefs.studio.value = it }
+                OutlinedButton({ ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://claude.ai/code")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, Modifier.fillMaxWidth()) { Text(tr("Computer sessions (Remote Control)", "Bilgisayardaki oturumlar (Remote Control)")) }
+                Hint(tr("On the computer run: claude remote-control. The session then shows up there and you can watch and steer it from the phone.", "Bilgisayarda şunu çalıştır: claude remote-control. Oturum orada görünür; telefondan izleyip yönlendirebilirsin."))
+            }
+            if (sc == "alive") Section(R.string.sec_keep) {
                 Button(onSetup, Modifier.fillMaxWidth()) { Text(tr("Setup wizard (Termux, Ubuntu, Claude)", "Kurulum sihirbazı (Termux, Ubuntu, Claude)")) }
                 if (Build.VERSION.SDK_INT >= 31) SwitchRow(R.string.dynamic_color, null, dyn) { Prefs.dynamic.value = it }
                 SwitchRow(R.string.screen_on, null, screenOn) { Prefs.screenOn.value = it }
                 SwitchRow(R.string.keep_service, null, keep) { Prefs.keepAlive.value = it; if (it) KeepAliveService.start(ctx) }
                 Button(onGuide) { Text(stringResource(R.string.guide_title)) }
             }
+        }
+        }
         }
     }
 }
@@ -494,4 +638,44 @@ private fun FontPreviews(current: String, onPick: (String) -> Unit) {
             ) { Text("09:05", color = Color.White, fontSize = 22.sp, fontFamily = fonts[k], maxLines = 1) }
         }
     }
+}
+
+
+/** Every model a provider offers, searchable; tap one to use it. "Free only" shows when the provider says which are free (OpenRouter). */
+@Composable
+private fun ModelBrowser(p: Providers.P, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val http = remember { okhttp3.OkHttpClient.Builder().connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS).readTimeout(20, java.util.concurrent.TimeUnit.SECONDS).build() }
+    var list by remember { mutableStateOf<List<Pair<String, Boolean>>?>(null) }
+    var err by remember { mutableStateOf("") }
+    var q by remember { mutableStateOf("") }
+    var freeOnly by remember { mutableStateOf(false) }
+    LaunchedEffect(p.id) { list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Providers.listModels(p, http) { err = it } } }
+    AlertDialog(onDismissRequest = onDismiss, confirmButton = { TextButton(onDismiss) { Text(tr("Close", "Kapat")) } },
+        title = { Text(p.name) },
+        text = {
+            Column {
+                OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text(tr("Search models", "Model ara")) })
+                val all = list
+                if (all != null && all.any { it.second }) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(tr("Free only", "Sadece ücretsiz"), Modifier.weight(1f)); Switch(freeOnly, { freeOnly = it })
+                }
+                when {
+                    all == null && err.isEmpty() -> Text(tr("Loading…", "Yükleniyor…"), Modifier.padding(top = 12.dp))
+                    all == null -> Text(err, Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.error)
+                    else -> {
+                        val shown = all.filter { (!freeOnly || it.second) && it.first.contains(q, true) }
+                        Text("${shown.size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                            items(shown.size) { i ->
+                                val (id, free) = shown[i]
+                                Row(Modifier.fillMaxWidth().clickable { onPick(id) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(id, Modifier.weight(1f), fontSize = 14.sp)
+                                    if (free) Text(tr("free", "ücretsiz"), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
 }

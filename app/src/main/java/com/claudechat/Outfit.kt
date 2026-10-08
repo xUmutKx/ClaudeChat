@@ -88,13 +88,26 @@ object Outfit {
     }
 
     /** Body colours: the target hue (degrees) the orange body is rotated to; "gray" is a special case. */
-    val SKINS = listOf("orange", "red", "pink", "purple", "blue", "teal", "green", "yellow", "gray")
+    val SKINS = listOf("orange", "red", "pink", "purple", "blue", "teal", "green", "yellow", "gray", "white", "cream", "brown")
     private val HUE = mapOf("red" to 355f, "pink" to 330f, "purple" to 270f, "blue" to 215f, "teal" to 175f, "green" to 125f, "yellow" to 48f)
-    val SKIN_SWATCH = mapOf("orange" to 0xFFD97757, "red" to 0xFFE0524D, "pink" to 0xFFE06AA8, "purple" to 0xFF9A6AE0, "blue" to 0xFF4C8FE8, "teal" to 0xFF3FB7A8, "green" to 0xFF5DB85D, "yellow" to 0xFFE0B83C, "gray" to 0xFF9A9A9A)
+    val SKIN_SWATCH = mapOf("orange" to 0xFFD97757, "red" to 0xFFE0524D, "pink" to 0xFFE06AA8, "purple" to 0xFF9A6AE0, "blue" to 0xFF4C8FE8, "teal" to 0xFF3FB7A8, "green" to 0xFF5DB85D, "yellow" to 0xFFE0B83C, "gray" to 0xFF9A9A9A, "white" to 0xFFF1F1F1, "cream" to 0xFFEBD9B8, "brown" to 0xFF8A4B36)
 
     /** 4x5 colour matrix (row-major, the layout both Android and Compose use) for the chosen body colour, or null for the original orange. */
     fun skinMatrix(name: String = Prefs.mascotSkin.value): FloatArray? {
         if (name == "gray") return floatArrayOf(.3f, .59f, .11f, 0f, 0f,  .3f, .59f, .11f, 0f, 0f,  .3f, .59f, .11f, 0f, 0f,  0f, 0f, 0f, 1f, 0f)
+        // white: grey scale lifted so the orange body lands near white while the dark eyes stay dark
+        if (name == "white") return floatArrayOf(.465f, .915f, .17f, 0f, 10f,  .465f, .915f, .17f, 0f, 10f,  .465f, .915f, .17f, 0f, 10f,  0f, 0f, 0f, 1f, 0f)
+        // cream: a little of the colour left, brightened
+        if (name == "cream") {
+            val s = .35f; val g = 1.3f
+            val l = floatArrayOf(.3f * (1 - s), .59f * (1 - s), .11f * (1 - s))
+            val m = FloatArray(20)
+            for (row in 0..2) for (k in 0..2) m[row * 5 + k] = g * (l[k] + (if (k == row) s else 0f))
+            m[18] = 1f
+            return m
+        }
+        // brown: the orange, darkened
+        if (name == "brown") return floatArrayOf(.62f, 0f, 0f, 0f, 0f,  0f, .62f, 0f, 0f, 0f,  0f, 0f, .62f, 0f, 0f,  0f, 0f, 0f, 1f, 0f)
         val target = HUE[name] ?: return null
         val a = Math.toRadians((target - 15f).toDouble()); val c = Math.cos(a).toFloat(); val s = Math.sin(a).toFloat()
         return floatArrayOf(

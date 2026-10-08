@@ -55,7 +55,7 @@ object Cmds {
         if (localList.none { it.name == name }) return false
         when (name) {
             "model" -> if (arg.isEmpty()) openOptions() else {
-                Prefs.model.value = if (arg == "default") "" else arg
+                Prefs.setChatModel(Engine.currentId.value, if (arg == "default") "" else arg)
                 Engine.note(appStr(R.string.note_model, arg))
             }
             "effort" -> if (arg !in efforts && arg != "default") openOptions() else {

@@ -38,16 +38,24 @@ object Termux {
     private const val USR = "/data/data/com.termux/files/usr"
     private const val HOME = "/data/data/com.termux/files/home"
 
+    /** What the connection attempt is doing right now ("" when idle), shown under the spinner. */
+    val note = kotlinx.coroutines.flow.MutableStateFlow("")
+
+    /** The bridge script for the setup / repair script served to Termux. */
+    fun bridgeB64(c: Context): String = Base64.encodeToString(c.assets.open("bridge.js").readBytes(), Base64.NO_WRAP)
+    fun portStr(): String = Prefs.port.value.filter(Char::isDigit).ifEmpty { "8787" }
+    fun distroName(): String = distro()
+
     /** Last output / error of the direct (root) launcher, shown when the bridge cannot be reached. */
     @Volatile var log = ""
     @Volatile private var proc: Process? = null
 
-    private fun inner(c: Context, toFile: Boolean = false): String {
+    private fun inner(c: Context, toFile: Boolean = false, kill: Boolean = true): String {
         val b64 = Base64.encodeToString(c.assets.open("bridge.js").readBytes(), Base64.NO_WRAP)
         val port = Prefs.port.value.filter(Char::isDigit).ifEmpty { "8787" }
         val token = cleanToken()
         return "mkdir -p /root/claudechat; : > /root/claudechat/bridge.log; echo $b64 | base64 -d > /root/claudechat/bridge.js; " +
-            "pkill -f '^node /root/claudechat/bridge.js'; sleep 0.3;" +
+            (if (kill) "pkill -f '^node /root/claudechat/bridge.js'; sleep 0.3;" else "") +
             "CC_TOKEN=$token CC_PORT=$port exec node /root/claudechat/bridge.js" + if (toFile) " >>/root/claudechat/bridge.log 2>&1" else ""
     }
 
@@ -82,7 +90,7 @@ object Termux {
                 p.inputStream.bufferedReader().forEachLine { buf.append(it).append('\n'); if (buf.length > 3000) buf.delete(0, buf.length - 3000); log = buf.toString() }
             } catch (e: Exception) { }
         }.start()
-        repeat(90) { // cold proot-distro start can take a while; do not kill it early
+        repeat(40) { // cold start takes ~10s; a failing su launcher must not block the Termux fallback for minutes
             Thread.sleep(500)
             if (pingBlocking()) { guard(); return true }
         }
@@ -98,12 +106,12 @@ object Termux {
         } catch (e: Exception) { }
     }
 
-    private fun suChain(c: Context): Boolean {
+    private fun suChain(c: Context, kill: Boolean): Boolean {
         val uid = termuxUid(c)
         val env = "export PREFIX=$USR HOME=$HOME TMPDIR=$USR/tmp PATH=$USR/bin:$USR/bin/applets:/system/bin LANG=en_US.UTF-8; " +
             "for f in $USR/lib/libtermux-exec*.so; do [ -e \"\$f\" ] && export LD_PRELOAD=\$f && break; done; "
         // detached (own session, reparented to init) so it is not a child of the app/Termux and survives their death
-        val script = env + "setsid nohup $USR/bin/proot-distro login ${distro()} -- bash -lc " + shQuote(inner(c, true)) + " >/dev/null 2>&1 </dev/null &"
+        val script = env + "setsid nohup $USR/bin/proot-distro login ${distro()} -- bash -lc " + shQuote(inner(c, true, kill)) + " >/dev/null 2>&1 </dev/null &"
         // Phantom-process / doze tweaks first (not persistent), then the launcher as Termux's own uid when possible, else as root.
         try { ProcessBuilder("su", "-c", tweakCmds(c).joinToString("; ")).redirectErrorStream(true).start().waitFor() } catch (e: Exception) { log = "su: ${e.message}"; return false }
         val tries = buildList {
@@ -126,7 +134,8 @@ object Termux {
         pr.inputStream.bufferedReader().readText().trim()
     } catch (e: Exception) { "" }
 
-    fun startBridge(c: Context): Int? {
+    /** [kill] = false (watchdog / auto start): never kill a bridge that may just be busy; a stale one makes the new one exit (EADDRINUSE). */
+    fun startBridge(c: Context, kill: Boolean = true): Int? {
         // one launch at a time: concurrent launches (watchdog + chat) would pkill each other's fresh bridge
         if (!starting.compareAndSet(false, true)) return null
         log = ""
@@ -134,14 +143,21 @@ object Termux {
         Thread {
             try {
                 if (pingBlocking()) return@Thread
-                if (suChain(app)) return@Thread
+                // Termux's own context first: it is the same environment as the hand-typed command, which is known to work
+                // (proot under the su domain often fails); root launcher only as the fallback.
+                val viaTermux = installed(app) && granted(app)
+                if (viaTermux) {
+                    note.value = tr("Starting through Termux…", "Termux üzerinden başlatılıyor…")
+                    run(app, "termux-wake-lock 2>/dev/null; exec proot-distro login ${distro()} -- bash -lc " + shQuote(inner(app, false, kill)))
+                    repeat(40) { Thread.sleep(500); if (pingBlocking()) { guard(); return@Thread } }
+                    log += "Termux RUN_COMMAND: no answer (is allow-external-apps=true set and Termux restarted?)\n"
+                }
+                note.value = tr("Trying root…", "Root deneniyor…")
+                if (suChain(app, kill)) return@Thread
                 val tail = bridgeLogTail()
                 if (tail.isNotEmpty()) log += "\n--- bridge.log ---\n$tail"
-                if (installed(app) && granted(app)) {
-                    run(app, "termux-wake-lock 2>/dev/null; exec proot-distro login ${distro()} -- bash -lc " + shQuote(inner(app)))
-                    repeat(30) { Thread.sleep(500); if (pingBlocking()) return@Thread }
-                } else if (log.isEmpty()) log = "root: denied or unavailable; Termux RUN_COMMAND: not set up"
-            } finally { starting.set(false) }
+                if (!viaTermux && log.isEmpty()) log = "root: denied or unavailable; Termux RUN_COMMAND: not set up"
+            } finally { starting.set(false); note.value = "" }
         }.start()
         return null
     }

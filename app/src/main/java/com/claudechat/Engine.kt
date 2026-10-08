@@ -57,6 +57,9 @@ private class Run(val id: String) {
     var streamed = false
     var anyText = false
     var gotResult = false
+    // the claude process was ended by a signal (143 = SIGTERM, 137 = SIGKILL...): that is an interruption, not a failure, so the turn goes on by itself
+    @Volatile var interrupted = false
+    var resumes = 0
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -280,7 +283,7 @@ object Engine {
 
     private fun drain(r: Run) { r.pending.removeFirstOrNull()?.let { start(r, it) } }
 
-    private fun badModel(s: String) = Prefs.model.value.isNotEmpty() &&
+    private fun badModel(id: String, s: String) = Prefs.chatModel(id).isNotEmpty() &&
         (s.contains("model", true) && (s.contains("not found", true) || s.contains("invalid", true) || s.contains("issue with the selected", true) || s.contains("may not exist", true)))
 
     /** Stops the chat on screen; other chats keep running. */
@@ -307,11 +310,26 @@ object Engine {
 
     /** Newest Gradle build log the bridge can find: file, seconds since its last write, and its tail. */
     @Volatile var buildAlive = false
+    /** Seconds the running Gradle build has been going (read from its process by the bridge), or -1 when the bridge could not tell. */
+    @Volatile var buildElapsed = -1
+    private val buildSeen = HashMap<String, Long>()   // log file -> when this app first saw it running (fallback for the elapsed time)
     fun buildLog(): Triple<String, Int, String>? = try {
         http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/build")).header("X-Token", Termux.cleanToken()).build()).execute().use { resp ->
-            if (!resp.isSuccessful) null else JSONObject(resp.body!!.string()).let { o -> buildAlive = o.optBoolean("alive"); if (o.optString("file").isEmpty()) null else Triple(o.getString("file"), o.optInt("age"), o.optString("text")) }
+            if (!resp.isSuccessful) null else JSONObject(resp.body!!.string()).let { o ->
+                buildAlive = o.optBoolean("alive"); buildElapsed = o.optInt("elapsed", -1)
+                if (o.optString("file").isEmpty()) null else {
+                    val f = o.getString("file"); val text = o.optString("text")
+                    // a new run of the same log file starts again from a short log: forget the old first-seen time
+                    synchronized(buildSeen) { if (buildSeen[f] == null || (text.length < 600 && !text.contains("BUILD "))) buildSeen[f] = System.currentTimeMillis() - o.optInt("age") * 1000L }
+                    Triple(f, o.optInt("age"), text)
+                }
+            }
         }
     } catch (e: Exception) { null }
+
+    /** Seconds since the build of [file] started: the process time from the bridge, else since this app first saw its log. */
+    fun buildElapsedFor(file: String): Int =
+        if (buildElapsed >= 0) buildElapsed else synchronized(buildSeen) { buildSeen[file]?.let { ((System.currentTimeMillis() - it) / 1000).toInt() } ?: -1 }
 
     /** Ends the bridge's claude process of a chat (it is started again on the next message). */
     fun killProc(chat: String) {
@@ -350,7 +368,7 @@ object Engine {
     /** HTTP status of the bridge, or -1 when unreachable. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) {
         try {
-            http.newBuilder().callTimeout(2, TimeUnit.SECONDS).build()
+            http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build()
                 .newCall(Request.Builder().url(url("/ping")).header("X-Token", Termux.cleanToken()).build())
                 .execute().use { it.code }
         } catch (e: IOException) { -1 }
@@ -370,11 +388,48 @@ object Engine {
         } catch (e: Exception) { null }
     }
 
+    // ---- sign-in through the bridge: Claude opens in the phone's browser, GitHub shows a device code ------------------------
+
+    class Auth(val claudeIn: Boolean, val email: String, val ghInstalled: Boolean, val ghIn: Boolean, val ghUser: String)
+    class Login(val state: String, val url: String, val code: String, val out: String)
+
+    /** Who is signed in (the bridge asks `claude auth status` and `gh auth status` in Ubuntu), or null when the bridge cannot be reached. */
+    suspend fun authStatus(): Auth? = withContext(Dispatchers.IO) {
+        try {
+            http.newBuilder().callTimeout(20, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/auth")).header("X-Token", Termux.cleanToken()).build()).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val o = JSONObject(resp.body!!.string()); val c = o.optJSONObject("claude"); val g = o.optJSONObject("gh")
+                Auth(c?.optBoolean("loggedIn") == true, c?.optString("email").orEmpty(), g?.optBoolean("installed") == true, g?.optBoolean("loggedIn") == true, g?.optString("user").orEmpty())
+            }
+        } catch (e: Exception) { null }
+    }
+
+    /** The GitHub login's token (the bridge asks `gh auth token`), or null when not signed in or the bridge is down. Blocking: call it off the main thread. */
+    fun ghTokenBlocking(): String? = try {
+        http.newBuilder().callTimeout(8, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/gh/token")).header("X-Token", Termux.cleanToken()).build()).execute().use { r ->
+            if (r.isSuccessful) r.body!!.string().trim().takeIf { it.isNotEmpty() } else null
+        }
+    } catch (e: Exception) { null }
+
+    /** [what] = "claude" or "gh"; [action] = start / state / cancel / code. */
+    suspend fun login(what: String, action: String, code: String = ""): Login? = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().header("X-Token", Termux.cleanToken())
+            val call = if (action == "state") req.url(url("/login/state?what=$what")).get()
+                else req.url(url("/login/$action")).post(JSONObject().put("what", what).put("code", code).toString().toRequestBody("application/json".toMediaType()))
+            http.newBuilder().callTimeout(10, TimeUnit.SECONDS).build().newCall(call.build()).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val o = JSONObject(resp.body!!.string())
+                Login(o.optString("state"), o.optString("url"), o.optString("code"), o.optString("out"))
+            }
+        } catch (e: Exception) { null }
+    }
+
     /** Starts the bridge through Termux and waits for it. Returns an error string or null. */
     suspend fun startBridgeAndWait(onDetail: (String) -> Unit = {}): String? {
         onDetail(appStr(R.string.starting_bridge))
-        Termux.startBridge(App.ctx)?.let { return appStr(it) }
-        repeat(75) {
+        Termux.startBridge(App.ctx, kill = false)?.let { return appStr(it) }
+        repeat(130) {
             delay(1000)
             if (ping() == 200) return null
         }
@@ -390,7 +445,10 @@ object Engine {
         if (bridge.value == 0) return
         scope.launch {
             bridge.value = -2
-            if (ping() == 200) bridge.value = 200
+            // a busy bridge (scanning /proc, big file lists) can miss one ping: only a few misses in a row mean it is gone
+            var up = false
+            repeat(3) { if (!up) { up = ping() == 200; if (!up) delay(1500) } }
+            if (up) bridge.value = 200
             else { bridge.value = -1; if (Prefs.autoStart.value) connect() }
         }
     }
@@ -406,9 +464,11 @@ object Engine {
     }
 
     private suspend fun execute(r: Run, prompt: String) {
-        r.curId = null; r.streamed = false; r.anyText = false; r.gotResult = false
+        r.curId = null; r.streamed = false; r.anyText = false; r.gotResult = false; r.interrupted = false; r.resumes = 0
         r.agents.value = emptyList(); r.shell.value = false
         try {
+            val pv = Providers.current()
+            if (pv.id != "claude") { direct(r, pv); return }
             val p = ping()
             if (p != 200) {
                 if (!Prefs.autoStart.value) return fail(r, appStr(R.string.err_offline, Prefs.port.value), Status.Offline)
@@ -433,6 +493,59 @@ object Engine {
         }
     }
 
+    /** A question to the user before a tool changes something: shown as a dialog in the chat. */
+    class Ask(val title: String, val detail: String) { val answer = CompletableDeferred<Int>() } // 0 no, 1 yes, 2 yes and do not ask again in this chat
+    val approval = MutableStateFlow<Ask?>(null)
+    private val alwaysOk = ConcurrentHashMap.newKeySet<String>()
+
+    private suspend fun ask(r: Run, tool: String, a: Ask): Boolean {
+        if (alwaysOk.contains(r.id + tool)) return true
+        approval.value = a
+        val v = try { a.answer.await() } finally { approval.value = null }
+        if (v == 2) alwaysOk.add(r.id + tool)
+        return v != 0
+    }
+
+    /** Another AI answers directly over the internet; with tools on it can read and change files in the agent folder and run commands, in the app itself. */
+    private suspend fun direct(r: Run, pv: Providers.P) {
+        setDetail(r, pv.name)
+        val msgs = JSONArray()
+        val system = (if (Prefs.studio.value) Providers.STUDIO + "\n\n" else "") + (if (Prefs.agentTools.value)
+            "You are a coding agent on the user's Android phone. Your project folder is ${AgentTools.root().path}; relative paths start there. Use the tools to read, search, edit and run things instead of guessing, and keep answers short." else "")
+        if (system.isNotEmpty()) msgs.put(JSONObject().put("role", "system").put("content", system))
+        r.messages.value.filter { (it.role == Role.User || it.role == Role.Claude) && it.text.isNotBlank() }.takeLast(40)
+            .forEach { msgs.put(JSONObject().put("role", if (it.role == Role.User) "user" else "assistant").put("content", it.text)) }
+        val mode = Prefs.mode.value
+        var tools: JSONArray? = if (Prefs.agentTools.value) AgentTools.specs(mode) else null
+        val client = http.newBuilder().connectTimeout(20, TimeUnit.SECONDS).build()
+        var steps = 0
+        while (steps++ < 30) {
+            r.curId = null
+            val turn = try {
+                withContext(Dispatchers.IO) { Providers.completion(pv, msgs, tools, client, { r.call = it }) { appendClaude(r, it) } }
+            } catch (e: IOException) {
+                if (tools != null && steps == 1 && Regex("\\b(400|404|422)\\b").containsMatchIn(e.message.orEmpty())) { tools = null; add(r, Role.Note, tr0("This model cannot use tools: answering without files and commands.", "Bu model araç kullanamıyor: dosya ve komut olmadan cevaplıyorum.")); continue }
+                throw e
+            }
+            if (turn.calls.isEmpty()) break
+            val am = JSONObject().put("role", "assistant").put("content", if (turn.text.isEmpty()) JSONObject.NULL else turn.text)
+            am.put("tool_calls", JSONArray(turn.calls.map { JSONObject().put("id", it.id).put("type", "function").put("function", JSONObject().put("name", it.name).put("arguments", it.args.ifBlank { "{}" })) }))
+            msgs.put(am)
+            for (c in turn.calls) {
+                val a = try { JSONObject(c.args.ifBlank { "{}" }) } catch (e: Exception) { JSONObject() }
+                r.tool = c.name; r.shell.value = c.name == "Bash"; r.cmd = if (c.name == "Bash") a.optString("command").lineSequence().firstOrNull().orEmpty().take(300) else ""
+                setDetail(r, appStr(R.string.using_tool, c.name))
+                add(r, Role.Tool, toolSummary(c.name, a), detail = toolDetail(a))
+                val out = if (AgentTools.needsAsk(c.name, mode) && !ask(r, c.name, Ask(toolSummary(c.name, a), toolDetail(a)))) "The user declined this action."
+                    else withContext(Dispatchers.IO) { AgentTools.run(c.name, a, mode) }
+                msgs.put(JSONObject().put("role", "tool").put("tool_call_id", c.id).put("content", out))
+            }
+            r.shell.value = false
+        }
+        if (steps > 30) add(r, Role.Note, tr0("Stopped after 30 steps.", "30 adımdan sonra durdum."))
+        if (r.status.value == Status.Working) finish(r, Status.Done)
+    }
+
     /** Short notes on the latest other chats (title, first question, last answer) so a fresh session knows the context without replaying history. */
     private fun oldChatNotes(id: String): String {
         val sb = StringBuilder()
@@ -447,7 +560,7 @@ object Engine {
 
     private suspend fun stream(r: Run, prompt: String, canRetry: Boolean) {
         val notes = if (Prefs.chatNotes.value && sessionOf(r.id).isEmpty() && r.messages.value.count { it.role == Role.User } <= 1) oldChatNotes(r.id) else ""
-        val body = JSONObject().put("prompt", notes + prompt).put("chat", r.id).put("cwd", Prefs.cwd.value).put("mode", Prefs.mode.value).put("addDir", Prefs.attachDir.value).put("model", Prefs.model.value).put("effort", Prefs.effort.value)
+        val body = JSONObject().put("prompt", (if (Prefs.studio.value) "[" + Providers.STUDIO + "]\n\n" else "") + notes + prompt).put("chat", r.id).put("cwd", Prefs.cwd.value).put("mode", Prefs.mode.value).put("addDir", Prefs.attachDir.value).put("model", Prefs.chatModel(r.id)).put("effort", Prefs.effort.value)
         val sess = sessionOf(r.id)
         if (sess.isNotEmpty()) body.put("session", sess)
         val req = Request.Builder().url(url("/chat")).header("X-Token", Termux.cleanToken())
@@ -468,6 +581,19 @@ object Engine {
             setSession(r.id, "")
             r.curId = null; r.streamed = false
             stream(r, prompt, canRetry = false)
+        } else if (r.interrupted && !r.gotResult && currentCoroutineContext().isActive) {
+            r.interrupted = false
+            if (r.resumes < 3) {
+                // same session, nothing shown: the bridge starts a new claude that picks the conversation up where the old one stopped
+                r.resumes++
+                r.curId = null; r.streamed = false
+                delay(1000)
+                stream(r, "Your process was interrupted. Carry on from where you stopped; do not start over.", canRetry = false)
+            } else {
+                // it keeps getting ended (Android killing it?): say so quietly, without the red error
+                add(r, Role.Note, tr0("Claude was interrupted several times. Send a message and it carries on.", "Claude birkaç kez yarıda kesildi. Bir mesaj yaz, devam eder."))
+                setStatus(r, Status.Idle); save(r); drain(r)
+            }
         }
     }
 
@@ -550,10 +676,15 @@ object Engine {
                 val res = o.optString("result")
                 if (o.optBoolean("is_error")) {
                     if (canRetry && res.contains("No conversation found", true)) return true
-                    if (canRetry && badModel(res)) { add(r, Role.Note, "Model '${Prefs.model.value}' failed, using default."); Prefs.model.value = ""; return true }
+                    if (canRetry && badModel(r.id, res)) { add(r, Role.Note, "Model '${Prefs.chatModel(r.id)}' failed, using default."); Prefs.setChatModel(r.id, ""); return true }
                     fail(r, res.ifBlank { appStr(R.string.status_error) })
                 } else {
-                    if (!r.anyText && res.isNotBlank()) appendClaude(r, res)
+                    // the final answer must always show: when nothing from this turn contains it (text streamed earlier was only a preface, or the stream lost it), add it as its own message
+                    if (res.isNotBlank()) {
+                        val turn = r.messages.value.takeLastWhile { it.role != Role.User }.filter { it.role == Role.Claude }
+                        val norm = { t: String -> t.filter { !it.isWhitespace() } }
+                        if (!r.anyText || turn.none { norm(it.text).contains(norm(res)) || norm(res).contains(norm(it.text)) && it.text.length > res.length / 2 }) { r.curId = null; appendClaude(r, res) }
+                    }
                     finish(r, Status.Done)
                 }
             }
@@ -567,15 +698,20 @@ object Engine {
             "bridge_exit" -> {
                 val code = o.optInt("code")
                 val err = o.optString("stderr")
+                // ended by a signal (not by an error of its own): the turn is simply carried on
+                if (!r.gotResult && code in SIGNAL_EXITS) { r.interrupted = true; return false }
                 if (!r.gotResult && code != 0) {
                     if (canRetry && err.contains("No conversation found", true)) return true
-                    if (canRetry && badModel(err)) { add(r, Role.Note, "Model '${Prefs.model.value}' failed, using default."); Prefs.model.value = ""; return true }
+                    if (canRetry && badModel(r.id, err)) { add(r, Role.Note, "Model '${Prefs.chatModel(r.id)}' failed, using default."); Prefs.setChatModel(r.id, ""); return true }
                     fail(r, appStr(R.string.err_exit, code, err))
                 }
             }
         }
         return false
     }
+
+    /** Exit codes of a process ended from outside: 129 hangup, 130 interrupt, 131 quit, 137 killed, 143 terminated (and the same as plain signal numbers). */
+    private val SIGNAL_EXITS = setOf(129, 130, 131, 137, 143, 9, 15)   // exit code 1 and the like are real errors and stay errors
 
     private fun appendClaude(r: Run, text: String) {
         if (text.isEmpty()) return

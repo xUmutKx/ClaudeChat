@@ -242,6 +242,7 @@
     <string name="font_majormono">Major Mono</string>
     <string name="font_michroma">Michroma (wide)</string>
     <string name="ov_style_bubble">Floating bubble</string>
+    <string name="ov_style_buddy">Buddy</string>
     <string name="po_cap">Cap</string>
     <string name="po_phones">Headphones</string>
     <string name="po_halo">Halo</string>
@@ -249,4 +250,12 @@
     <string name="po_shades">Shades</string>
     <string name="po_santa">Santa hat</string>
     <string name="err_dropped">The connection to the bridge was interrupted. Claude may still be working; open the chat again or tap Connect.</string>
+    <string name="pill_access_desc">Lets Claude Chat draw the status pill and the buddy above the notification shade and the Settings screens. It reads nothing on your screen.</string>
+    <string name="sec_ai">Other AIs</string>
+    <string name="studio_on">Studio: pictures and pixel art</string>
+    <string name="studio_on_sub">The AI answers with an SVG picture or pixel art that shows right in the chat, with save and share.</string>
+    <string name="agent_on">Let the AI use files and commands</string>
+    <string name="agent_on_sub">Like Claude Code: it can read, search, edit files and run commands in the folder below.</string>
+    <string name="agent_root">Run its commands as root</string>
+    <string name="agent_root_sub">For the phone\'s own shell (needs root on the device).</string>
 </resources>

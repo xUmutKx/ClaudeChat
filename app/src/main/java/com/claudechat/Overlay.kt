@@ -16,6 +16,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.view.MotionEvent
 import android.view.ContextThemeWrapper
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -29,7 +30,11 @@ import android.widget.TextView
  */
 class Overlay(base: Context) {
     private val ctx = ContextThemeWrapper(base, android.R.style.Theme_Material)
-    private val wm = base.getSystemService(WindowManager::class.java)
+    private val sys = base
+    private var wm = PillAccess.wm(base)
+    private var otype = PillAccess.type()
+    /** Takes the accessibility layer when the service is on (above the shade and Settings); only while nothing is attached, so add and remove use the same manager. */
+    private fun pickLayer() { if (root == null && handle == null && blackLayer == null) { wm = PillAccess.wm(sys); otype = PillAccess.type() } }
     private var root: View? = null
     private var style = ""
 
@@ -61,6 +66,7 @@ class Overlay(base: Context) {
     private var cache = Triple(Status.Idle, "", "")
     private var lastStyleIn = ""
     private var capsule: Capsule? = null
+    private var pillRect: android.graphics.Rect? = null
     private var iconBox: View? = null
     private var pillVertical = false
     private var pillSide = 0
@@ -73,6 +79,24 @@ class Overlay(base: Context) {
     private var evTarget = -1                    // always-on pill: 1 = open, 0 = closed (animated), -1 = not decided yet
     private var curColor = 0
     private var glide: ValueAnimator? = null
+    val buddy = Buddy(base)
+
+    /** The pill's state across a rebuild (the screen turned), so the new view does not replay "something changed" and pop open. */
+    private class Keep(val last: Status?, val asleepHidden: Boolean, val prog: Float, val target: Int)
+    private var restore: Keep? = null
+    private var handle: View? = null                 // invisible strip under the pill: the pill sits where touches often never arrive
+    private var dockZone: android.graphics.Rect? = null
+    private var hDownX = 0f; private var hDownY = 0f; private var hDownT = 0L
+    private var hDragging = false; private var hIgnore = false
+    private var taps = 0; private var tapLast = 0L; private var tapRun: Runnable? = null
+
+    init {
+        buddy.onDrop = { x, y -> tryDock(x, y) }
+        buddy.onDrag = { x, y -> buddy.setDockHint(dockZone?.contains(x.toInt(), y.toInt()) == true) }
+    }
+
+    /** Both can be on at once, but the mascot lives in one place: the buddy when it is chosen as home, or always when there is no pill. */
+    private fun buddyHome(style: String) = Prefs.buddyOn.value && (Prefs.mascotHome.value == "buddy" || Prefs.mascotHome.value == "both" || style != "pill")
 
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
 
@@ -100,19 +124,31 @@ class Overlay(base: Context) {
         return android.graphics.drawable.LayerDrawable(arrayOf(androidx.core.content.ContextCompat.getDrawable(ctx, sc)!!.mutate(), shade, base))
     }
 
+    private var errFace = false
+
     private fun mascotDrawableBase(sleep: Boolean, computer: Boolean = false, alt: Boolean = false): android.graphics.drawable.Drawable {
         val hat = Outfit.hat()
         val skin = Outfit.skinMatrix()
         fun d(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate().also { if (skin != null) it.colorFilter = android.graphics.ColorMatrixColorFilter(skin) }
-        fun h(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate()
+        fun h(id: Int) = Mascots.hat(ctx, id)   // moved and scaled to sit on this character's head
         if (computer) {
-            val pcId = if (alt) R.drawable.ic_mascot_pc2 else R.drawable.ic_mascot_pc
-            if (hat == 0) return d(pcId)
-            return android.graphics.drawable.LayerDrawable(arrayOf(d(pcId), h(hat)))
+            val faces = Mascots.pc(alt).map { d(it) }
+            val body: android.graphics.drawable.Drawable = if (faces.size == 1) faces[0] else android.graphics.drawable.LayerDrawable(faces.toTypedArray())
+            if (hat == 0) return body
+            return android.graphics.drawable.LayerDrawable(arrayOf(body, h(hat)))
         }
-        if (hat == 0) return d(if (sleep) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot)
-        // outfit drawables share a taller 20x18 canvas so the hat fits above the head
-        return android.graphics.drawable.LayerDrawable(arrayOf(d(if (sleep) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), h(hat)))
+        if (errFace) { // error: crossed-out eyes
+            val x = d(R.drawable.ic_mascot_x18)
+            return if (hat == 0) x else android.graphics.drawable.LayerDrawable(arrayOf(x, h(hat)))
+        }
+        val blanket = sleep && Prefs.buddyBlanket.value == "1"   // asleep under its blanket, like the buddy
+        if (hat == 0 && !blanket) return d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep) else Mascots.r(R.drawable.ic_mascot))
+        // outfit and blanket drawables share a taller 20x18 canvas so the hat fits above the head
+        val layers = ArrayList<android.graphics.drawable.Drawable>()
+        layers.add(d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18)))
+        if (blanket) layers.add(androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_blanket)!!.mutate())
+        if (hat != 0) layers.add(h(hat))
+        return android.graphics.drawable.LayerDrawable(layers.toTypedArray())
     }
 
     private fun color(st: Status) = when (st) {
@@ -146,8 +182,18 @@ class Overlay(base: Context) {
         val black = styleIn.endsWith("+black")
         val style = styleIn.removeSuffix("+black")
         lastStyleIn = styleIn; cache = Triple(st, det, last)
-        if (style == "off" || !Settings.canDrawOverlays(ctx)) { hide(); return }
-        if (style != this.style || root == null || black != (blackLayer != null)) { hide(); if (black) showBlack(); show(style) }
+        if (!Settings.canDrawOverlays(ctx)) { hide(); return }
+        // the floating buddy runs next to the bar overlay
+        if (buddyHome(style)) { buddy.clearBubbleOnly(); buddy.render(st, det, last, (st == Status.Working && Engine.shell.value) || Engine.demoShell.value || st == Status.Background) }
+        else {
+            if (buddy.active) buddy.hide()
+            if (style == "pill" && Prefs.pillBubble.value == "1" && pillRect != null && !asleepHidden) buddy.bubbleOnly(st, det, last, pillRect) else buddy.clearBubbleOnly()
+        }
+        if (style == "off") { hidePill(); return }
+        if (style != this.style || root == null || black != (blackLayer != null)) {
+            hidePill(); pickLayer(); if (black) showBlack(); show(style)
+            restore?.let { lastStatus = it.last; asleepHidden = it.asleepHidden }
+        }
         val shell = (st == Status.Working && Engine.shell.value) || Engine.demoShell.value
         val c = if (shell) 0xFF2196F3.toInt() else color(st)
         val working = st.running
@@ -187,7 +233,10 @@ class Overlay(base: Context) {
             } else { blink?.cancel(); blink = null; t.visibility = View.GONE; t.text = ">_" }
         }
         mark?.text = markOf(st)
+        errFace = st == Status.Error || st == Status.Offline
         mascot?.setImageDrawable(mascotDrawable(st == Status.Idle, st == Status.Background || shell)) // background shell: laptop + blue face; idle: eyes closed + "z"
+        // the mascot is out walking as the buddy only while the buddy window really is on screen; if that failed, it comes back into the pill
+        mascot?.visibility = if (buddyHome(style) && Prefs.mascotHome.value != "both" && buddy.active) View.INVISIBLE else View.VISIBLE
         label?.text = text(st, det)
         if (style == "pill") {
             // idle: the mascot sleeps in the pill (eyes closed, "z"); done turns into sleep after a moment
@@ -234,11 +283,11 @@ class Overlay(base: Context) {
     fun refreshOpacity() { if (root != null && style == "pill") applyProg(evProg) }
 
     /** Re-draw with the last known state (look settings or the shell preview changed). */
-    fun redraw() { if (root != null) render(lastStyleIn, cache.first, cache.second, cache.third) }
+    fun redraw() { if (lastStyleIn.isNotEmpty()) render(lastStyleIn, cache.first, cache.second, cache.third) }
 
     /** While the chat is open the pill/curtain are hidden but stay attached (the window itself keeps Termux alive). */
     private var quiet = false
-    fun setQuiet(q: Boolean) { quiet = q; applyQuiet() }
+    fun setQuiet(q: Boolean) { quiet = q; buddy.setQuiet(q); applyQuiet() }
     private fun applyQuiet() {
         // only the island hides; the black layer is the whole point of black mode and stays (the island stays too while it is on)
         val hide = (quiet || asleepHidden || (eventMode() && evProg <= 0.001f && evAnim?.isRunning != true)) && blackLayer == null
@@ -246,6 +295,7 @@ class Overlay(base: Context) {
             val want = if (hide) 0 else 1
             if (want != evTarget) animatePill(want == 1)
         } else root?.visibility = if (hide) View.INVISIBLE else View.VISIBLE
+        handle?.visibility = if (hide) View.GONE else View.VISIBLE
         blackLayer?.visibility = View.VISIBLE
     }
 
@@ -329,6 +379,7 @@ class Overlay(base: Context) {
     private fun showEvent() {
         evHold?.let { main.removeCallbacks(it) }; evAnim?.cancel()
         root?.visibility = View.VISIBLE
+        handle?.visibility = View.VISIBLE
         ring?.burst()
         val from = evProg
         evAnim = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -419,7 +470,7 @@ class Overlay(base: Context) {
     }
 
     private fun params(w: Int, h: Int, flags: Int, gravity: Int, y: Int = 0) =
-        WindowManager.LayoutParams(w, h, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, flags, PixelFormat.TRANSLUCENT).also {
+        WindowManager.LayoutParams(w, h, otype, flags, PixelFormat.TRANSLUCENT).also {
             it.gravity = gravity; it.y = y
         }
 
@@ -457,10 +508,16 @@ class Overlay(base: Context) {
 
     /** The screen was rotated (or folded): put the pill back around the camera. */
     fun onRotate() {
+        if (buddy.active) buddy.onRotate()
         if (root == null) return
         val s = lastStyleIn
-        hide()
+        // the rebuilt view must come back in the state the old one was in (hidden stays hidden), not replay "status changed"
+        restore = Keep(lastStatus, asleepHidden, evProg, evTarget)
+        hidePill()
         render(s, cache.first, cache.second, cache.third)
+        // an event pill that was open when the screen turned lost its timer with the old view: close it again
+        if (eventMode() && evProg > 0.001f) evHold = Runnable { hideEvent() }.also { main.postDelayed(it, 1500) }
+        restore = null
     }
 
     /** Full-screen AMOLED black under the island; keeps the screen on, double-tap leaves. */
@@ -477,7 +534,7 @@ class Overlay(base: Context) {
         }
         fun add(w: View, top: Int = 0) = v.addView(w, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(top) })
         if (Prefs.blackMascot.value) {
-            val m = ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot) }
+            val m = ImageView(ctx).apply { setImageResource(Mascots.r(R.drawable.ic_mascot)) }
             bMascot = m; bBob = dancer(m, dp(6).toFloat())
             v.addView(m, LinearLayout.LayoutParams(dp(56), dp(40)).apply { bottomMargin = dp(12) })
         }
@@ -547,11 +604,12 @@ class Overlay(base: Context) {
     fun refreshBlack() {
         if (blackLayer == null) return
         val s = lastStyleIn
-        hide()
+        hidePill()
         render(s, cache.first, cache.second, cache.third)
     }
 
     private fun show(style: String) {
+        pickLayer()
         this.style = style
         val base = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         when (style) {
@@ -571,7 +629,7 @@ class Overlay(base: Context) {
                 val trim = 1 // px taken off each long side of the pill (the pill is 2 px thinner than the camera rim)
                 val thick = hole + 2 * rim - 2 * trim // pill thickness across the edge
                 val ringLen = (if (vertical) cut.height() else cut.width()) + 2 * rim + dp(6)
-                val extra = (Prefs.pillExtra.value.toIntOrNull() ?: 5).coerceIn(0, 24) // px added to each end; more reach = more status icons covered
+                val extra = (Prefs.pillExtra.value.toIntOrNull() ?: 0).coerceIn(0, 200) // optional px added to each end (setting, default 0: only as long as the mascot / tick need)
                 val side = dp(40) + extra
                 // room on both sides of the camera along the edge: centred pill if both fit; a camera near a corner grows the pill one way, away from the edge
                 val along = if (vertical) cut.centerY() else cut.centerX()
@@ -588,7 +646,7 @@ class Overlay(base: Context) {
                     background = cap
                 }
                 fun lp(len: Int) = if (vertical) LinearLayout.LayoutParams(thick, len) else LinearLayout.LayoutParams(len, thick)
-                mascot = ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot); setPadding(dp(8), dp(3), dp(4), dp(3)) }
+                mascot = ImageView(ctx).apply { setImageResource(Mascots.r(R.drawable.ic_mascot)); setPadding(dp(8), dp(3), dp(4), dp(3)) }
                 ring = RingView(ctx) // thin ring around the camera hole (spinner while working)
                 if (mode == 1) box.addView(ring, lp(ringLen))
                 box.addView(mascot, lp(side))
@@ -611,23 +669,21 @@ class Overlay(base: Context) {
                 bob = dancer(mascot!!, dp(2).toFloat())
                 root = box
                 val total = 2 * side + ringLen // camera sits in the middle segment
-                var taps = 0; var last = 0L
-                box.setOnClickListener {
-                    val now = System.currentTimeMillis()
-                    taps = if (now - last < 700) taps + 1 else 1
-                    last = now
-                    if (taps >= 3) { taps = 0; closeNow() }
-                }
+                box.setOnTouchListener { v, e -> handleTouch(v, e) }
                 val flags = base or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                wm.addView(box, params(-2, -2, flags, Gravity.TOP or Gravity.START, 0).also {
+                val pillLp = params(-2, -2, flags, Gravity.TOP or Gravity.START, 0).also {
                     // absolute position so the middle segment lands exactly on the camera, whatever the edge
                     val start = when (mode) { 1 -> along - ringLen / 2; 2 -> along + ringLen / 2 - total; else -> along - total / 2 }.coerceIn(0, maxOf(0, span - total))
                     if (vertical) { it.x = (cut.left - rim + trim).coerceAtLeast(0); it.y = start }
                     else { it.x = start; it.y = (cut.top - rim + trim).coerceAtLeast(0) }
                     if (Build.VERSION.SDK_INT >= 30) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                     else if (Build.VERSION.SDK_INT >= 28) it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                })
-                evTarget = -1; applyProg(0f)
+                }
+                wm.addView(box, pillLp)
+                pillRect = if (vertical) android.graphics.Rect(pillLp.x, pillLp.y, pillLp.x + thick, pillLp.y + total) else android.graphics.Rect(pillLp.x, pillLp.y, pillLp.x + total, pillLp.y + thick)
+                addHandle(edge, pillLp.x, pillLp.y, thick, total, vertical)
+                val rs = restore
+                if (rs != null) { evTarget = rs.target; applyProg(rs.prog) } else { evTarget = -1; applyProg(0f) }
             }
             "bubble" -> { // a draggable round head: tap opens the chat, drag moves it, it snaps to the nearest side
                 val size = dp(58)
@@ -636,7 +692,7 @@ class Overlay(base: Context) {
                     elevation = dp(6).toFloat()
                 }
                 ring = RingView(ctx); frame.addView(ring, FrameLayout.LayoutParams(size, size))
-                mascot = ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot) }
+                mascot = ImageView(ctx).apply { setImageResource(Mascots.r(R.drawable.ic_mascot)) }
                 frame.addView(mascot, FrameLayout.LayoutParams(dp(36), dp(28), Gravity.CENTER))
                 spinner = null; mark = null; label = TextView(ctx); bob = dancer(mascot!!, dp(2).toFloat())
                 root = frame
@@ -654,7 +710,7 @@ class Overlay(base: Context) {
                         }
                         android.view.MotionEvent.ACTION_UP -> {
                             if (!moved) {
-                                ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                                ChatLauncher.open(ctx)
                             } else {
                                 lp.x = if (lp.x + size / 2 < screenWidth() / 2) dp(4) else screenWidth() - size - dp(4)
                                 lp.y = lp.y.coerceIn(statusBarHeight(), screenHeight() - size - dp(24))
@@ -673,7 +729,7 @@ class Overlay(base: Context) {
                     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                     setBackgroundColor(Color.BLACK); setPadding(dp(16), statusBarHeight(), dp(16), dp(6))
                 }
-                mascot = ImageView(ctx).apply { setImageResource(R.drawable.ic_mascot) }
+                mascot = ImageView(ctx).apply { setImageResource(Mascots.r(R.drawable.ic_mascot)) }
                 col.addView(mascot, LinearLayout.LayoutParams(dp(40), dp(28)))
                 label = TextView(ctx).apply { setTextColor(Color.WHITE); textSize = 14f; maxLines = 1; setPadding(dp(12), 0, dp(12), 0) }
                 col.addView(label, LinearLayout.LayoutParams(0, -2, 1f))
@@ -695,13 +751,95 @@ class Overlay(base: Context) {
         }
     }
 
+    /**
+     * The pill sits over the status bar, where touches often never arrive: a strip right beside it takes the taps and drags instead.
+     * Dragging out of it pulls the mascot out as the buddy; a buddy let go on the pill or the strip docks back in.
+     */
+    private fun addHandle(edge: Edge, wx: Int, wy: Int, thick: Int, total: Int, vertical: Boolean) {
+        val w = screenWidth(); val h = screenHeight()
+        val pad = dp(6); val band = dp(14)
+        val pill = android.graphics.Rect(wx, wy, wx + (if (vertical) thick else total), wy + (if (vertical) total else thick))
+        val strip = when (edge) {
+            Edge.TOP -> android.graphics.Rect(pill.left - pad, pill.bottom, pill.right + pad, pill.bottom + band)
+            Edge.BOTTOM -> android.graphics.Rect(pill.left - pad, pill.top - band, pill.right + pad, pill.top)
+            Edge.LEFT -> android.graphics.Rect(pill.right, pill.top - pad, pill.right + band, pill.bottom + pad)
+            Edge.RIGHT -> android.graphics.Rect(pill.left - band, pill.top - pad, pill.left, pill.bottom + pad)
+        }
+        strip.intersect(0, 0, w, h)
+        dockZone = android.graphics.Rect(minOf(pill.left, strip.left), minOf(pill.top, strip.top), maxOf(pill.right, strip.right), maxOf(pill.bottom, strip.bottom)).also { it.inset(-dp(24), -dp(24)) }
+        val mode = Prefs.pillHandle.value
+        if (mode == "0" || strip.isEmpty) return
+        val v = View(ctx)
+        if (mode == "2") v.setBackgroundColor(0x33FFFFFF)
+        v.setOnTouchListener { view, e -> handleTouch(view, e) }
+        val lp = params(strip.width(), strip.height(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            Gravity.TOP or Gravity.START).also { it.x = strip.left; it.y = strip.top }
+        try { wm.addView(v, lp); handle = v } catch (_: Exception) { }
+    }
+
+    private fun styleNow() = lastStyleIn.removeSuffix("+black")
+
+    /** Shared by the pill and its strip: a tap opens the chat bubble (three taps close everything), a drag pulls the mascot out as the buddy. */
+    private fun handleTouch(v: View, e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { hDownX = e.rawX; hDownY = e.rawY; hDownT = e.eventTime; hDragging = false; hIgnore = false }
+            MotionEvent.ACTION_MOVE -> {
+                if (!hDragging && !hIgnore && Math.hypot((e.rawX - hDownX).toDouble(), (e.rawY - hDownY).toDouble()) > dp(14)) {
+                    if (Prefs.buddyOn.value && !buddyHome(styleNow())) { hDragging = true; undock(e.rawX, e.rawY) } else hIgnore = true
+                }
+                if (hDragging) buddy.dragTo(e.rawX, e.rawY, e.eventTime)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (hDragging) { buddy.release(); hDragging = false }
+                else if (e.actionMasked == MotionEvent.ACTION_UP && !hIgnore && e.eventTime - hDownT < 400) tapped()
+                hIgnore = false
+            }
+        }
+        return true
+    }
+
+    private fun tapped() {
+        val now = System.currentTimeMillis()
+        taps = if (now - tapLast < 700) taps + 1 else 1
+        tapLast = now
+        tapRun?.let { main.removeCallbacks(it) }; tapRun = null
+        if (taps >= 3) { taps = 0; closeNow(); return }
+        tapRun = Runnable { if (taps == 1) ChatLauncher.open(ctx); taps = 0; tapRun = null }.also { main.postDelayed(it, 380) }
+    }
+
+    /** The mascot leaves the pill: it becomes the buddy right under the finger and follows it. */
+    private fun undock(x: Float, y: Float) {
+        Prefs.mascotHome.value = "buddy"
+        render(lastStyleIn, cache.first, cache.second, cache.third)
+        buddy.grab(x, y)
+    }
+
+    /** A buddy that is let go on the pill (or its strip) goes back into it. */
+    private fun tryDock(x: Float, y: Float): Boolean {
+        val z = dockZone ?: return false
+        if (styleNow() != "pill" || !z.contains(x.toInt(), y.toInt())) return false
+        Prefs.mascotHome.value = "pill"
+        render(lastStyleIn, cache.first, cache.second, cache.third)
+        ring?.burst(); mascot?.let { playEyesAnimation(it) }
+        return true
+    }
+
     /** Triple tap on the island: switch everything off (service, overlay, notification). */
     private fun closeNow() {
         android.widget.Toast.makeText(ctx, ctx.localized().getString(R.string.ov_closed), android.widget.Toast.LENGTH_SHORT).show()
         ctx.startService(android.content.Intent(ctx, KeepAliveService::class.java).setAction(KeepAliveService.ACTION_STOP))
     }
 
-    fun hide() {
+    /** Rebuilds everything on the current window layer (after the accessibility service was switched on or off). */
+    fun relayout() { val s = lastStyleIn; val c = cache; hide(); if (s.isNotEmpty()) render(s, c.first, c.second, c.third) }
+
+    /** Everything off: the buddy and the bar overlay. */
+    fun hide() { buddy.hide(); hidePill() }
+
+    /** Just the bar overlay (pill / line / curtain / bubble head) and the black layer; the buddy keeps walking. */
+    private fun hidePill() {
+        handle?.let { try { wm.removeView(it) } catch (e: Exception) { } }; handle = null; dockZone = null
+        tapRun?.let { main.removeCallbacks(it) }; tapRun = null; taps = 0
         pulse?.cancel(); bob?.cancel(); eyes?.cancel(); bBob?.cancel(); blink?.cancel(); blink = null; term = null
         pcAnim?.cancel(); pcAnim = null; zAnim?.cancel(); zAnim = null; sleepTimer?.let { main.removeCallbacks(it) }; sleepTimer = null; asleepHidden = false
         root?.let { try { wm.removeView(it) } catch (e: Exception) { } }
@@ -709,7 +847,7 @@ class Overlay(base: Context) {
         bStatus = null; bDet = null; bLast = null; bBatt = null; bMascot = null; bBob = null
         evAnim?.cancel(); evAnim = null; evHold?.let { main.removeCallbacks(it) }; evHold = null; glide?.cancel(); glide = null; curColor = 0
         capsule = null; iconBox = null; evProg = 1f; evTarget = -1
-        root = null; style = ""
+        root = null; style = ""; pillRect = null
         mascot = null; spinner = null; mark = null; label = null; sub = null; bar = null; pulse = null; bob = null; eyes = null; ring = null
         lastStatus = null
     }
@@ -737,3 +875,4 @@ fun clockFont(ctx: Context, key: String): android.graphics.Typeface {
         else -> asset("outfit", 200) // default: "outfit" (older saved value "thin" lands here too)
     } ?: android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
 }
+

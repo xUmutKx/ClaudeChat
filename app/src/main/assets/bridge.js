@@ -55,9 +55,117 @@ function makeTitle(user, reply) {
   });
 }
 
+// ---- sign-in helpers: Claude opens in the Android browser, GitHub shows a device code --------------------------------
+// `claude auth login` and `gh auth login` open the browser through $BROWSER. Pointing it at a tiny script hands the link to the app,
+// which opens it on the phone; the answer comes back to the CLI over localhost, so nothing has to be copied by hand.
+const fs2 = require('fs'), path2 = require('path'), { execFile } = require('child_process');
+const LOGIN_DIR = path2.join(process.env.HOME || '/root', 'claudechat');
+const stripAnsi = (t) => t.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\r/g, '');
+const LOGIN_CMD = { claude: 'claude auth login', gh: 'gh auth login -h github.com -p https -w' };
+const logins = {}; // 'claude' | 'gh' -> { child, url, code, out, state, started, pressed }
+
+function ensureOpener() {
+  try {
+    fs2.mkdirSync(LOGIN_DIR, { recursive: true });
+    fs2.writeFileSync(path2.join(LOGIN_DIR, 'openurl.sh'), '#!/bin/sh\nprintf "%s" "$1" > "' + LOGIN_DIR + '/login-${CC_LOGIN:-x}.url"\n', { mode: 0o755 });
+  } catch (e) {}
+}
+
+function startLogin(what) {
+  if (!LOGIN_CMD[what]) return null;
+  const old = logins[what];
+  if (old && old.child) { old.state = 'cancelled'; try { old.child.kill('SIGTERM'); } catch (e) {} }
+  ensureOpener();
+  try { fs2.unlinkSync(path2.join(LOGIN_DIR, 'login-' + what + '.url')); } catch (e) {}
+  const st = { child: null, url: '', code: '', out: '', state: 'starting', started: Date.now(), pressed: false };
+  logins[what] = st;
+  let child;
+  try {
+    // `script` gives the CLI a terminal (it prints its prompts only to one); -e passes the exit status through
+    child = spawn('script', ['-qefc', LOGIN_CMD[what], '/dev/null'], {
+      env: Object.assign({}, process.env, { BROWSER: path2.join(LOGIN_DIR, 'openurl.sh'), CC_LOGIN: what, TERM: 'dumb' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (e) { st.state = 'error'; st.out = String(e); return st; }
+  st.child = child;
+  const feed = (d) => {
+    st.out = (st.out + stripAnsi(d.toString())).slice(-4000);
+    if (what === 'gh') {
+      const m = /one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i.exec(st.out);
+      if (m) st.code = m[1];
+      if (!st.pressed && /Press Enter/i.test(st.out)) { st.pressed = true; try { child.stdin.write('\n'); } catch (e) {} }
+    }
+  };
+  child.stdout.on('data', feed);
+  child.stderr.on('data', feed);
+  child.stdin.on('error', () => {});
+  child.on('error', (e) => { st.state = 'error'; st.out += '\n' + e; });
+  child.on('close', (code) => {
+    st.child = null;
+    if (st.state === 'cancelled') return;
+    st.state = code === 0 ? 'done' : 'error';
+    if (what === 'gh' && code === 0) { try { spawn('gh', ['auth', 'setup-git'], { stdio: 'ignore' }); } catch (e) {} }
+  });
+  return st;
+}
+
+function loginView(what) {
+  const st = logins[what];
+  if (!st) return { state: 'idle', url: '', code: '', out: '', age: 0 };
+  if (!st.url) { try { st.url = fs2.readFileSync(path2.join(LOGIN_DIR, 'login-' + what + '.url'), 'utf8').trim(); } catch (e) {} }
+  const state = st.state === 'starting' && (st.url || st.code) ? 'waiting' : st.state;
+  return { state, url: st.url, code: st.code, out: st.out.slice(-300), age: Math.round((Date.now() - st.started) / 1000) };
+}
+
+function run(cmd, args, ms) {
+  return new Promise((resolve) => {
+    try { execFile(cmd, args, { timeout: ms || 8000, maxBuffer: 1 << 20 }, (err, stdout, stderr) => resolve({ err, out: String(stdout || ''), errOut: String(stderr || '') })); }
+    catch (e) { resolve({ err: e, out: '', errOut: '' }); }
+  });
+}
+
+async function authStatus() {
+  const [c, g] = await Promise.all([run('claude', ['auth', 'status']), run('gh', ['auth', 'status'])]);
+  let claude = { loggedIn: false, email: '' };
+  try { const j = JSON.parse(c.out); claude = { loggedIn: !!j.loggedIn, email: j.email || '' }; } catch (e) {}
+  const missing = g.err && g.err.code === 'ENOENT';
+  const gtxt = stripAnsi(g.out + g.errOut);
+  const um = /account\s+(\S+)/i.exec(gtxt);
+  const gh = { installed: !missing, loggedIn: !missing && !g.err, user: um ? um[1] : '' };
+  return { claude, gh };
+}
+
 const server = http.createServer(async (req, res) => {
   if (TOKEN && req.headers['x-token'] !== TOKEN) { res.writeHead(401); return res.end('unauthorized'); }
   if (req.method === 'GET' && req.url === '/ping') { res.writeHead(200); return res.end('pong'); }
+  if (req.method === 'GET' && req.url === '/auth') {
+    const a = await authStatus();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(a));
+  }
+  if (req.method === 'GET' && req.url === '/gh/token') {
+    // the GitHub login (gh auth login) doubles as the key for GitHub Models: nothing to copy by hand
+    const r = await run('gh', ['auth', 'token']);
+    res.writeHead(r.err ? 404 : 200, { 'Content-Type': 'text/plain' });
+    return res.end(r.err ? '' : r.out.trim());
+  }
+  if (req.method === 'GET' && req.url.startsWith('/login/state')) {
+    const what = (req.url.split('what=')[1] || '').split('&')[0];
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(loginView(what)));
+  }
+  if (req.method === 'POST' && req.url.startsWith('/login/')) {
+    let b;
+    try { b = await readBody(req); } catch (e) { res.writeHead(400); return res.end('bad json'); }
+    const what = String(b.what || '');
+    if (!LOGIN_CMD[what]) { res.writeHead(400); return res.end('unknown'); }
+    if (req.url === '/login/start') startLogin(what);
+    else if (req.url === '/login/cancel') { const st = logins[what]; if (st && st.child) { st.state = 'cancelled'; try { st.child.kill('SIGTERM'); } catch (e) {} } }
+    else if (req.url === '/login/code') { const st = logins[what]; if (st && st.child) { try { st.child.stdin.write(String(b.code || '').trim() + '\n'); } catch (e) {} } }
+    else { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(loginView(what)));
+  }
   if (req.method === 'GET' && req.url.startsWith('/ls')) {
     const fs = require('fs'), path = require('path');
     let p = '/root';
@@ -68,6 +176,9 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ path: p, parent: path.dirname(p), dirs }));
   }
   if (req.method === 'GET' && req.url === '/build') {
+    // the app asks every few seconds and the folder walk below is synchronous: answer from a cache so the event loop is never held up
+    if (global.__bc && Date.now() - global.__bc.t < 8000) { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(global.__bc.s); }
+    const __end = res.end.bind(res); res.end = (x) => { global.__bc = { t: Date.now(), s: x }; return __end(x); };
     // newest recent log that looks like a Gradle build (Claude Code background-task output, or a *build*.log in the project folders)
     const fs = require('fs'), path = require('path');
     const found = [];
@@ -81,7 +192,7 @@ const server = http.createServer(async (req, res) => {
         else if (/\.(output|log)$/.test(e.name)) { try { const st = fs.statSync(f); if (Date.now() - st.mtimeMs < 30 * 60 * 1000 && st.size > 200) found.push({ f, m: st.mtimeMs, size: st.size }); } catch (x) {} }
       }
     };
-    walk('/tmp', 0); walk('/root/projects', 3); walk('/sdcard/Download/projects', 1);
+    walk('/tmp', 2); walk('/root/projects', 5);
     found.sort((a, b) => b.m - a.m);
     let out = { file: '', age: -1, text: '' };
     for (const c of found.slice(0, 12)) {
@@ -94,13 +205,32 @@ const server = http.createServer(async (req, res) => {
     }
     // a Gradle JVM is running right now (the dex / R8 steps print nothing for minutes, so the log alone cannot tell)
     let alive = false;
+    const clients = []; // seconds each Gradle client process has been running (the build started when it did)
     try {
+      // process start times are in clock ticks since boot; boot time itself is unreliable (proot fakes /proc/uptime), so measure against this process
+      const ticksOf = (pid) => { const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf8'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[19]); };
+      let selfTicks = NaN; try { selfTicks = ticksOf(process.pid); } catch (x) {}
       for (const d of fs.readdirSync('/proc')) {
         if (!/^\d+$/.test(d) || Number(d) === process.pid) continue;
-        try { if (/org\.gradle|GradleDaemon|GradleWrapperMain/.test(fs.readFileSync('/proc/' + d + '/cmdline', 'utf8'))) { alive = true; break; } } catch (x) {}
+        try {
+          const cmd = fs.readFileSync('/proc/' + d + '/cmdline', 'utf8');
+          if (/org\.gradle|GradleDaemon|GradleWrapperMain/.test(cmd)) alive = true;
+          if (isFinite(selfTicks) && /GradleWrapperMain|org\.gradle\.launcher\.GradleMain|gradle-launcher/.test(cmd) && !/GradleDaemon/.test(cmd)) {
+            const secs = process.uptime() + (selfTicks - ticksOf(d)) / 100;
+            if (secs >= 0 && secs < 6 * 3600) clients.push({ secs: Math.round(secs), cmd: cmd.replace(/\0/g, ' ') });
+          }
+        } catch (x) {}
       }
     } catch (e) {}
     out.alive = alive;
+    // which build is this log of? the log is named <project>_build.log or sits in the project folder: prefer the client that mentions that project
+    out.elapsed = -1;
+    if (clients.length) {
+      const stem = path.basename(out.file || '').replace(/(_|-)?build.*$/i, '').replace(/\.(log|output)$/i, '');
+      const hit = stem.length > 2 ? clients.filter((c) => c.cmd.toLowerCase().includes(stem.toLowerCase())) : [];
+      const pick = (hit.length ? hit : clients).sort((a, b) => a.secs - b.secs)[0];
+      out.elapsed = pick.secs;
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(out));
   }

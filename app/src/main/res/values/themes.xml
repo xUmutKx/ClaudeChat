@@ -4,6 +4,12 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
+    <!-- the chat bubble: a see-through window, so the app you were using stays visible behind the panel -->
+    <style name="Theme.ClaudeChat.Bubble" parent="Theme.ClaudeChat">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
     <color name="window_bg">#FFFFF8F6</color>
     <color name="ic_bg">#FF1F1B18</color>
 </resources>

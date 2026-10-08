@@ -81,6 +81,14 @@ val Draft = mutableStateOf("")
 @Composable
 fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit = {}, onTasks: () -> Unit = {}) {
     val msgs by Engine.messages.collectAsState()
+    val ask by Engine.approval.collectAsState()
+    ask?.let { a ->
+        AlertDialog(onDismissRequest = { a.answer.complete(0) },
+            title = { Text(tr("Allow this?", "İzin veriyor musun?")) },
+            text = { Column { Text(a.title, fontWeight = FontWeight.Bold); Text(a.detail.take(900), Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp), fontFamily = FontFamily.Monospace, fontSize = 12.sp) } },
+            confirmButton = { Row { TextButton({ a.answer.complete(2) }) { Text(tr("Always (this chat)", "Hep (bu sohbet)")) }; TextButton({ a.answer.complete(1) }) { Text(tr("Allow", "İzin ver")) } } },
+            dismissButton = { TextButton({ a.answer.complete(0) }) { Text(tr("Deny", "Reddet")) } })
+    }
     val st by Engine.status.collectAsState()
     val det by Engine.detail.collectAsState()
     var input by Draft
@@ -90,10 +98,11 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         scope.launch { uris.forEach { u -> withContext(Dispatchers.IO) { Attach.save(ctx, u) }?.let { atts.add(it) } } }
     }
-    val model by Prefs.model.flow.collectAsState()
+    val curId by Engine.currentId.collectAsState()
+    val modelTick by Prefs.chatModelTick.collectAsState()
+    val model = remember(curId, modelTick) { Prefs.chatModel(curId) }
     val modelSeen by Engine.modelName.collectAsState()
     val chats by Engine.chats.collectAsState()
-    val curId by Engine.currentId.collectAsState()
     val title = chats.firstOrNull { it.id == curId }?.title.orEmpty()
     var replyTo by remember { mutableStateOf<Msg?>(null) }
     var sheet by remember { mutableStateOf(false) }
@@ -108,9 +117,7 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit 
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).navigationBarsPadding().imePadding()) {
         // this chat looks finished but another chat still works in the background: say so (blue) instead of "Done"
-        val overall by Engine.overall.collectAsState()
-        val shownSt = if (st != Status.Working && overall == Status.Background) Status.Background else st
-        TopBar(title, shownSt, if (shownSt == Status.Background) Engine.overallDetail.collectAsState().value else det, model.ifEmpty { shortModel(modelSeen) }, { sheet = true }, onChats, onSettings, shell, onTasks) { custom = true }
+        TopBar(title, st, det, model.ifEmpty { shortModel(modelSeen) }, { sheet = true }, onChats, onSettings, shell, onTasks) { custom = true }
         if (sheet) OptionsSheet { sheet = false }
         if (custom) CustomizeSheet { custom = false }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -177,7 +184,7 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
                     if (sc != 0) androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(sc), null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                     if (sc != 0) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = (Prefs.sceneDim.flow.collectAsState().value.toIntOrNull() ?: 35) / 100f)))
                     val pc = st == Status.Background || shell
-                    Mascot(st.running, Modifier.size(48.dp, 35.dp), sleeping = st == Status.Idle, computer = pc)
+                    Mascot(st.running, Modifier.size(48.dp, 35.dp), sleeping = st == Status.Idle, computer = pc, error = st == Status.Error || st == Status.Offline)
                 }
                 }
                 Spacer(Modifier.width(8.dp))
@@ -208,30 +215,50 @@ object Dance {
 
 /** Mascot picture with the chosen outfit's hat on top (same pixel canvas as the pill's). */
 @Composable
-private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean = false) {
+private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean = false, error: Boolean = false) {
     val hat = Outfit.hat(Prefs.pillOutfit.flow.collectAsState().value)
     val skin = Prefs.mascotSkin.flow.collectAsState().value
+    Prefs.mascotChar.flow.collectAsState().value; Prefs.provider.flow.collectAsState().value // follow the character
     val tint = remember(skin) { Outfit.skinMatrix(skin)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
     if (computer) { // a shell runs: a small laptop (back cover with an apple-like logo) in front of the mascot, its screen lighting the face green
         var alt by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(450); alt = !alt } }
         Box(modifier) {
-            Image(painterResource(if (alt) R.drawable.ic_mascot_pc2 else R.drawable.ic_mascot_pc), null, Modifier.fillMaxSize(), colorFilter = tint)
-            if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxSize())
+            Mascots.pc(alt).forEach { Image(painterResource(it), null, Modifier.fillMaxSize(), colorFilter = tint) }
+            if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxSize().hatFit())
         }
         return
     }
-    if (hat == 0) { Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep else R.drawable.ic_mascot), null, modifier, colorFilter = tint); return }
+    if (error) { // crossed-out eyes
+        Box(modifier) {
+            Image(painterResource(R.drawable.ic_mascot_x18), null, Modifier.fillMaxSize(), colorFilter = tint)
+            if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxSize().hatFit())
+        }
+        return
+    }
+    val blanketOn = sleeping && Prefs.buddyBlanket.flow.collectAsState().value == "1"
+    if (hat == 0 && !blanketOn) { Image(painterResource(if (sleeping) Mascots.r(R.drawable.ic_mascot_sleep) else Mascots.r(R.drawable.ic_mascot)), null, modifier, colorFilter = tint); return }
+    // falling asleep: the blanket is pulled up over the body
+    var pulled by remember { mutableStateOf(false) }
+    LaunchedEffect(sleeping) { pulled = false; if (sleeping) { kotlinx.coroutines.delay(60); pulled = true } }
+    val pull by animateFloatAsState(if (pulled) 1f else 0f, tween(900), label = "blanket")
     Box(modifier) {
-        Image(painterResource(if (sleeping) R.drawable.ic_mascot_sleep18 else R.drawable.ic_mascot18), null, Modifier.fillMaxSize(), colorFilter = tint)
-        Image(painterResource(hat), null, Modifier.fillMaxSize())
+        Image(painterResource(if (sleeping) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18)), null, Modifier.fillMaxSize(), colorFilter = tint)
+        if (blanketOn) Image(painterResource(R.drawable.ic_blanket), null, Modifier.fillMaxSize().graphicsLayer { translationY = (1f - pull) * size.height * 0.45f; alpha = pull })
+        if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxSize().hatFit())
     }
 }
 
 /** The mascot; while Claude works it dances in the same stepped frames as the notification. */
 @Composable
-fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false, computer: Boolean = false) {
+fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false, computer: Boolean = false, error: Boolean = false, idle: Boolean = false) {
     if (computer) { MascotImg(false, modifier, computer = true); return }
+    if (idle && !working && !sleeping && !error) { // awake and doing nothing: blinks now and then
+        var closed by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(2200L + (0..3800).random()); closed = true; kotlinx.coroutines.delay(140); closed = false } }
+        MascotImg(closed, modifier); return
+    }
+    if (error && !working) { MascotImg(false, modifier, error = true); return }
     if (sleeping && !working) { // idle: eyes closed and a drifting "z"
         val t = rememberInfiniteTransition(label = "zzz")
         val a by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "z")
@@ -266,9 +293,15 @@ private fun EmptyState(onSetup: () -> Unit = {}) {
     val ctx = LocalContext.current
     val bridge by Engine.bridge.collectAsState()
     val err by Engine.bridgeError.collectAsState()
+    val note by Termux.note.collectAsState()
+    val clip = LocalClipboardManager.current
+    var auth by remember { mutableStateOf<Engine.Auth?>(null) }
+    // one tap also grants Claude Chat the right to run commands in Termux (a system dialog, once), then connects
+    val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { Engine.connect() }
     LaunchedEffect(Unit) { Engine.checkBridge() }
+    LaunchedEffect(bridge) { auth = if (bridge == 200) Engine.authStatus() else null }
     Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Image(painterResource(R.drawable.ic_mascot), null, Modifier.size(120.dp, 84.dp))
+        Image(painterResource(Mascots.r(R.drawable.ic_mascot)), null, Modifier.size(120.dp, 84.dp))
         Spacer(Modifier.height(20.dp))
         Text(stringResource(R.string.empty_title), fontFamily = FontFamily.Serif, fontSize = 28.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         // one tap: starts the bridge with the current token (also done by itself when auto-start is on)
@@ -280,12 +313,22 @@ private fun EmptyState(onSetup: () -> Unit = {}) {
                     Spacer(Modifier.width(10.dp))
                     Text(stringResource(if (bridge == 0) R.string.starting_bridge else R.string.checking), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (note.isNotEmpty()) Text(note, Modifier.padding(top = 6.dp), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 if (!Termux.installed(ctx)) Button(onSetup) { Text(tr("Set up from scratch", "Sıfırdan kur")) }
-                else Button({ Engine.connect() }) { Text(stringResource(R.string.start_claude)) }
+                else {
+                    Button({ if (!Termux.granted(ctx)) perm.launch(Termux.PERM) else Engine.connect() }) { Text(stringResource(R.string.start_claude)) }
+                    // when starting from here does not work (Termux not allowed to take orders yet): one paste in Termux fixes it for good
+                    OutlinedButton({ SetupServer.command()?.let { clip.setText(androidx.compose.ui.text.AnnotatedString(it)); Termux.openTermux(ctx) } }) { Text(tr("Repair the connection (paste once)", "Bağlantıyı onar (bir kez yapıştır)")) }
+                }
                 if (Termux.installed(ctx)) TextButton(onSetup) { Text(tr("Setup guide", "Kurulum rehberi")) }
                 if (err.isNotBlank()) Text(err.take(300), Modifier.padding(top = 10.dp), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
+        } else if (auth != null && auth?.claudeIn == false) {
+            // connected, but Claude does not know who you are yet: the setup screen signs in through the browser
+            Spacer(Modifier.height(20.dp))
+            Text(tr("Claude is not signed in yet.", "Claude'a henüz giriş yapılmadı."), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onSetup, Modifier.padding(top = 8.dp)) { Text(tr("Sign in", "Giriş yap")) }
         }
     }
 }
@@ -451,6 +494,10 @@ private fun Composer(value: String, onChange: (String) -> Unit, working: Boolean
             )
             Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onAttach, Modifier.size(40.dp)) { Icon(Icons.Filled.Add, stringResource(R.string.attach), tint = cs.onSurfaceVariant) }
+                val studio by Prefs.studio.flow.collectAsState()
+                IconButton({ Prefs.studio.value = !studio }, Modifier.size(40.dp)) { Icon(Icons.Filled.Brush, "Studio", tint = if (studio) cs.primary else cs.onSurfaceVariant) }
+                val pv by Prefs.provider.flow.collectAsState()
+                if (pv != "claude") Text(Providers.byId(pv).name, fontSize = 12.sp, color = cs.onSurfaceVariant)
                 Spacer(Modifier.weight(1f))
                 if (working) {
                     FilledIconButton(onClick = onStop, modifier = Modifier.size(40.dp),
@@ -478,6 +525,7 @@ fun MarkdownText(text: String, color: Color, serif: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         parts.forEach { (isCode, body) ->
             if (isCode) {
+                if (body.contains("<svg") && body.contains("</svg>")) SvgCard(body.substring(body.indexOf("<svg"), body.lastIndexOf("</svg>") + 6))
                 Surface(shape = RoundedCornerShape(10.dp), color = cs.surfaceContainerLowest) {
                     Box {
                         Text(
@@ -613,7 +661,9 @@ private fun Palette(cmds: List<Cmd>, onPick: (Cmd) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun OptionsSheet(onDismiss: () -> Unit) {
-    val model by Prefs.model.flow.collectAsState()
+    val curId by Engine.currentId.collectAsState()
+    val modelTick by Prefs.chatModelTick.collectAsState()
+    val model = remember(curId, modelTick) { Prefs.chatModel(curId) }
     val effort by Prefs.effort.flow.collectAsState()
     val mode by Prefs.mode.flow.collectAsState()
     val models = listOf("" to stringResource(R.string.default_label),
@@ -625,9 +675,9 @@ private fun OptionsSheet(onDismiss: () -> Unit) {
             Text(stringResource(R.string.options_title), style = MaterialTheme.typography.titleLarge)
             Text(stringResource(R.string.model_label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                models.forEach { (v, l) -> FilterChip(model == v, { Prefs.model.value = v }, { Text(l) }) }
+                models.forEach { (v, l) -> FilterChip(model == v, { Prefs.setChatModel(curId, v) }, { Text(l) }) }
             }
-            OutlinedTextField(model, { Prefs.model.value = it.trim() }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.custom_model)) }, singleLine = true)
+            OutlinedTextField(model, { Prefs.setChatModel(curId, it.trim()) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.custom_model)) }, singleLine = true)
             Text(stringResource(R.string.effort_label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 efforts.forEach { (v, l) -> FilterChip(effort == v, { Prefs.effort.value = v }, { Text(l) }) }

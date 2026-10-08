@@ -1,0 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp" android:height="18dp" android:viewportWidth="20" android:viewportHeight="18">
+    <!-- the laptop alone (seen from the back), laid over any character's body -->
+    <path android:fillColor="#FFB8BEC6" android:pathData="M3,9H17V16H3Z" />
+    <path android:fillColor="#FF8A9099" android:pathData="M3,15H17V16H3Z" />
+    <path android:fillColor="#FFDADFE5" android:pathData="M2,16H18V17H2Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M10,11H11V12H10Z M8,12H12V14H8Z M9,14H11V15H9Z" />
+</vector>
