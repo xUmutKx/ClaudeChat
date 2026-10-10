@@ -32,7 +32,7 @@ data class Msg(
 )
 
 /** One sub-agent (Task/Agent tool call) of the running turn: what it is doing right now and whether it finished. */
-data class AgentInfo(val id: String, val title: String, val kind: String, val activity: String = "", val tools: Int = 0, val done: Boolean = false)
+data class AgentInfo(val id: String, val title: String, val kind: String, val activity: String = "", val tools: Int = 0, val done: Boolean = false, val bg: Boolean = false)
 
 data class Chat(val id: String, val title: String, val session: String, val cost: Double, val updated: Long)
 
@@ -42,6 +42,7 @@ private class Run(val id: String) {
     val status = MutableStateFlow(Status.Idle)
     val detail = MutableStateFlow("")
     val cost = MutableStateFlow(0.0)   // accumulated cost of this chat, USD
+    val ctx = MutableStateFlow(0)      // tokens in the context window after the last answer
     val agents = MutableStateFlow<List<AgentInfo>>(emptyList())
     val shell = MutableStateFlow(false) // a Bash command is running right now
     @Volatile var since = 0L       // when the running turn started (task manager)
@@ -82,6 +83,8 @@ object Engine {
 
     /** Status for the overlay / notification: working while any chat works, else the latest change. */
     val overall = MutableStateFlow(Status.Idle)
+    /** The last state of every chat (working, done, error ...), so the chat list can light each one up. */
+    val chatState = MutableStateFlow<Map<String, Status>>(emptyMap())
     val overallDetail = MutableStateFlow("")
 
     private fun <T> current(empty: T, f: (Run) -> StateFlow<T>): StateFlow<T> =
@@ -93,28 +96,11 @@ object Engine {
     val detail: StateFlow<String> = current("") { it.detail }
     val cost: StateFlow<Double> = current(0.0) { it.cost }
     val agents: StateFlow<List<AgentInfo>> = current(emptyList()) { it.agents }
+    val context: StateFlow<Int> = current(0) { it.ctx }
     val shell: StateFlow<Boolean> = current(false) { it.shell }
 
     /** "Show me the blue shell state": the header, pill and bubble pretend a command runs for a few seconds (customize sheet preview). */
     val demoShell = MutableStateFlow(false)
-    /** Multi-agent test: three fake agents appear above the composer, make progress and finish (about 15 s). A real turn clears them. */
-    fun previewAgents() {
-        val r = chatRun(currentId.value.ifEmpty { return })
-        uiScope.launch {
-            r.agents.value = listOf(
-                AgentInfo("demo1", tr0("Read the project files", "Proje dosyalarını oku"), "Explore", tr0("Searching *.kt", "*.kt aranıyor")),
-                AgentInfo("demo2", tr0("Check the build setup", "Derleme ayarlarını kontrol et"), "general-purpose", tr0("Reading build.gradle.kts", "build.gradle.kts okunuyor")),
-                AgentInfo("demo3", tr0("Write a short summary", "Kısa bir özet yaz"), "Plan", tr0("Waiting", "Bekliyor")),
-            )
-            val steps = listOf(
-                Triple("demo1", tr0("Reading Chat.kt", "Chat.kt okunuyor"), 3), Triple("demo2", tr0("Running gradle tasks", "gradle görevleri çalışıyor"), 2),
-                Triple("demo3", tr0("Drafting the answer", "Cevap taslağı yazılıyor"), 1), Triple("demo1", tr0("Found 12 files", "12 dosya bulundu"), 6), Triple("demo2", tr0("Build looks fine", "Derleme sorunsuz"), 5),
-            )
-            for ((id, act, n) in steps) { delay(2200); r.agents.value = r.agents.value.map { if (it.id == id) it.copy(activity = act, tools = n) else it } }
-            for (id in listOf("demo1", "demo2", "demo3")) { delay(1400); r.agents.value = r.agents.value.map { if (it.id == id) it.copy(done = true) else it } }
-            delay(4000); r.agents.value = r.agents.value.filter { !it.id.startsWith("demo") }
-        }
-    }
     private fun tr0(en: String, trText: String) = if (Prefs.lang.value == "tr") trText else en
 
     fun previewShell() { demoShell.value = true; uiScope.launch { delay(10_000); demoShell.value = false } }
@@ -148,6 +134,8 @@ object Engine {
     /** The run of a chat, created (and its messages read from disk) on first use. */
     private fun chatRun(id: String): Run = runs.getOrPut(id) {
         Run(id).also { r ->
+            // a turn that was running when the app was closed keeps its start time, so the counter does not reset
+            r.since = App.ctx.getSharedPreferences("runs", 0).getLong(id, 0L)
             r.messages.value = readMsgs(id)
             r.nextId = (r.messages.value.maxOfOrNull { it.id } ?: 0) + 1
             r.cost.value = chats.value.firstOrNull { it.id == id }?.cost ?: 0.0
@@ -182,6 +170,7 @@ object Engine {
         val id = newId()
         chats.update { it.filter { c -> c.title.isNotEmpty() } + Chat(id, "", "", 0.0, System.currentTimeMillis()) }
         chatRun(id)
+        Wear.switch(currentId.value, id)
         currentId.value = id
         updateOverall()
     }
@@ -189,6 +178,7 @@ object Engine {
     private fun open(id: String) {
         val r = chatRun(id)
         if (r.status.value != Status.Working) setStatus(r, Status.Idle)
+        Wear.switch(currentId.value, id)
         currentId.value = id
         updateOverall()
     }
@@ -207,6 +197,7 @@ object Engine {
 
     private fun setStatus(r: Run, st: Status) {
         r.status.value = st
+        chatState.update { it + (r.id to st) }
         if (st != Status.Working) r.detail.value = ""
         busy.update { if (st == Status.Working) it + r.id else it - r.id }
         updateOverall(st)
@@ -276,6 +267,7 @@ object Engine {
 
     private fun start(r: Run, prompt: String) {
         r.since = System.currentTimeMillis(); r.tool = ""; r.cmd = ""
+        App.ctx.getSharedPreferences("runs", 0).edit().putLong(r.id, r.since).apply()
         setStatus(r, Status.Working)
         KeepAliveService.start(App.ctx)
         r.job = scope.launch { execute(r, prompt) }
@@ -310,13 +302,15 @@ object Engine {
 
     /** Newest Gradle build log the bridge can find: file, seconds since its last write, and its tail. */
     @Volatile var buildAlive = false
+    /** The same build state as a flow, so the chat header can show "Compiling" while it runs. */
+    val buildRunning = MutableStateFlow(false)
     /** Seconds the running Gradle build has been going (read from its process by the bridge), or -1 when the bridge could not tell. */
     @Volatile var buildElapsed = -1
     private val buildSeen = HashMap<String, Long>()   // log file -> when this app first saw it running (fallback for the elapsed time)
     fun buildLog(): Triple<String, Int, String>? = try {
         http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/build")).header("X-Token", Termux.cleanToken()).build()).execute().use { resp ->
             if (!resp.isSuccessful) null else JSONObject(resp.body!!.string()).let { o ->
-                buildAlive = o.optBoolean("alive"); buildElapsed = o.optInt("elapsed", -1)
+                buildAlive = o.optBoolean("alive"); buildRunning.value = buildAlive; buildElapsed = o.optInt("elapsed", -1)
                 if (o.optString("file").isEmpty()) null else {
                     val f = o.getString("file"); val text = o.optString("text")
                     // a new run of the same log file starts again from a short log: forget the old first-seen time
@@ -563,6 +557,8 @@ object Engine {
         val body = JSONObject().put("prompt", (if (Prefs.studio.value) "[" + Providers.STUDIO + "]\n\n" else "") + notes + prompt).put("chat", r.id).put("cwd", Prefs.cwd.value).put("mode", Prefs.mode.value).put("addDir", Prefs.attachDir.value).put("model", Prefs.chatModel(r.id)).put("effort", Prefs.effort.value)
         val sess = sessionOf(r.id)
         if (sess.isNotEmpty()) body.put("session", sess)
+        // the bridge passes this to claude as the claudechat-phone MCP server (only while the phone tools are on)
+        if (Prefs.phoneTools.value) body.put("phoneToken", com.claudechat.phone.PhoneControl.token(App.ctx))
         val req = Request.Builder().url(url("/chat")).header("X-Token", Termux.cleanToken())
             .post(body.toString().toRequestBody("application/json".toMediaType())).build()
         val c = http.newCall(req)
@@ -623,6 +619,8 @@ object Engine {
                 }
             }
             "assistant" -> if (!sub) {
+                // what the context window holds now: fresh input plus cached input for this answer
+                o.getJSONObject("message").optJSONObject("usage")?.let { u -> r.ctx.value = u.optInt("input_tokens") + u.optInt("cache_read_input_tokens") + u.optInt("cache_creation_input_tokens") }
                 val content = o.getJSONObject("message").optJSONArray("content") ?: JSONArray()
                 for (i in 0 until content.length()) {
                     val b = content.getJSONObject(i)
@@ -633,7 +631,8 @@ object Engine {
                             val inp = b.optJSONObject("input")
                             if (name == "Task" || name == "Agent") {
                                 val title = inp?.optString("description").orEmpty().ifBlank { inp?.optString("prompt").orEmpty().lineSequence().firstOrNull().orEmpty() }.take(80).ifBlank { name }
-                                r.agents.value = r.agents.value + AgentInfo(b.optString("id"), title, inp?.optString("subagent_type").orEmpty().ifBlank { "agent" })
+                                // a background agent's tool result arrives at once ("launched"): it stays working until the turn ends
+                                r.agents.value = r.agents.value + AgentInfo(b.optString("id"), title, inp?.optString("subagent_type").orEmpty().ifBlank { "agent" }, bg = inp?.optBoolean("run_in_background") == true)
                             }
                             r.shell.value = name == "Bash"; r.tool = name
                             r.cmd = if (name == "Bash") inp?.optString("command").orEmpty().lineSequence().firstOrNull().orEmpty().take(300) else ""
@@ -664,7 +663,7 @@ object Engine {
                     val b = content.optJSONObject(i) ?: continue
                     if (b.optString("type") == "tool_result") {
                         val id = b.optString("tool_use_id")
-                        r.agents.value = r.agents.value.map { if (it.id == id) it.copy(done = true) else it }
+                        r.agents.value = r.agents.value.map { if (it.id == id && !it.bg) it.copy(done = true) else it }
                     }
                 }
             }
@@ -746,6 +745,7 @@ object Engine {
 
     private fun finish(r: Run, st: Status) {
         r.shell.value = false; r.agents.value = r.agents.value.map { it.copy(done = true) }
+        App.ctx.getSharedPreferences("runs", 0).edit().remove(r.id).apply()
         setStatus(r, st)
         save(r)
         // the island/overlay already shows "done"; a second notification would just duplicate it
@@ -766,7 +766,7 @@ object Engine {
     /** After the first answer, replaces the "first line of my message" title with a short topic title made by Claude (haiku). */
     private fun retitle(r: Run) {
         val users = r.messages.value.filter { it.role == Role.User }
-        if (users.size != 1) return
+        if (users.size > 3) return   // the bridge may fail once; a later answer tries again while the title is still the first line
         val chat = chats.value.firstOrNull { it.id == r.id } ?: return
         if (chat.title != firstLine(users[0].text)) return // already renamed
         val reply = r.messages.value.lastOrNull { it.role == Role.Claude }?.text.orEmpty()

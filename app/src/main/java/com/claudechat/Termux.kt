@@ -166,8 +166,8 @@ object Termux {
     fun rootSetup(): Boolean = try {
         val f = "/data/data/com.termux/files/home/.termux/termux.properties"
         val sh = "mkdir -p ${f.substringBeforeLast('/')}; grep -qs '^allow-external-apps *= *true' $f || echo 'allow-external-apps=true' >> $f; " +
-            "pm grant com.claudechat.app com.termux.permission.RUN_COMMAND; " +
-            "appops set --uid com.claudechat.app MANAGE_EXTERNAL_STORAGE allow; " +
+            "pm grant com.umutk.claudechat com.termux.permission.RUN_COMMAND; " +
+            "appops set --uid com.umutk.claudechat MANAGE_EXTERNAL_STORAGE allow; " +
             "grep -qs '^allow-external-apps *= *true' $f && am force-stop com.termux"
         val pr = ProcessBuilder("su", "-c", sh).redirectErrorStream(true).start()
         pr.inputStream.readBytes(); pr.waitFor() == 0

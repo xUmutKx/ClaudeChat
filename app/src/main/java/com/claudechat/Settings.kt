@@ -8,6 +8,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Search
 import android.net.Uri
 import android.os.Build
@@ -106,7 +107,7 @@ private fun Section(title: Int, content: @Composable ColumnScope.() -> Unit) {
         R.string.g_phantom_title -> Icons.Filled.Shield
         else -> null
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (icon != null) Icon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
             Text(stringResource(title), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
@@ -202,12 +203,11 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
         SettingsCat("conn", Icons.Filled.Link, tr("Connection", "Bağlantı"), tr("Termux bridge, port, token", "Termux köprüsü, port, anahtar"), tr("Claude", "Claude"),
             "bridge termux port token connect köprü anahtar"),
         SettingsCat("claude", Icons.Filled.Build, tr("Claude", "Claude"), tr("Permissions and folders", "İzinler ve klasörler"), tr("Claude", "Claude"),
-            "permission mode working folder attachment folder notes izin modu çalışma klasörü ek klasörü"),
+            "permission mode working folder attachment folder notes phone screen tap control izin modu çalışma klasörü ek klasörü telefon ekran dokunma"),
         SettingsCat("ai", Icons.Filled.AutoAwesome, tr("Other AIs & Studio", "Diğer yapay zekâlar ve Stüdyo"), tr("Gemini, DeepSeek, Groq, OpenRouter; pictures and pixel art", "Gemini, DeepSeek, Groq, OpenRouter; resim ve pixel art"), tr("Claude", "Claude"),
             "ai gemini deepseek groq openrouter mistral openai key api studio svg pixel art picture image yapay zeka anahtar resim"),
         SettingsCat("usage", Icons.Filled.Memory, tr("Usage & limits", "Kullanım ve limitler"), tr("5-hour and weekly limits, builds, CPU and memory", "5 saatlik ve haftalık limit, derleme, CPU, bellek"), tr("Claude", "Claude"),
             "usage limits five hour weekly build progress cpu memory resources kullanım limit derleme kaynak"),
-            "running chats shell commands stop tasks görev çalışan"),
         SettingsCat("look", Icons.Filled.Palette, tr("Look", "Görünüm"), tr("Theme and language", "Tema ve dil"), tr("Appearance", "Görünüm"),
             "theme dark mode language tema koyu mod dil"),
         SettingsCat("overlay", Icons.Filled.Layers, tr("Pill & overlay", "Pill ve overlay"), tr("Camera pill, bubble, line, curtain", "Kamera pill'i, balon, çizgi, perde"), tr("Appearance", "Görünüm"),
@@ -218,12 +218,14 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             "vibrate pattern answer error build titreşim cevap hata derleme"),
         SettingsCat("alive", Icons.Filled.BatteryChargingFull, tr("Stay alive", "Açık kalma"), tr("Battery, wake lock, setup wizard", "Pil, uyanık tutma, kurulum sihirbazı"), tr("Phone", "Telefon"),
             "battery wake lock keep alive setup wizard root tweaks pil uyanık kurulum"),
+        SettingsCat("phone", Icons.Filled.Smartphone, tr("Phone buddy", "Phone buddy"), tr("Let Claude use the phone", "Claude telefonu kullansın"), tr("Phone", "Telefon"),
+            "phone buddy telefon accessibility erişilebilirlik ekran dokunma tap screen"),
         SettingsCat("about", Icons.Filled.Info, tr("About", "Hakkında"), tr("Version, author, GitHub", "Sürüm, yapımcı, GitHub"), tr("About", "Hakkında"),
             "version author github sürüm yapımcı"),
     )
     Page(R.string.settings, { if (cat.isNotEmpty()) cat = "" else onBack() }) {
-        AnimatedContent(cat, transitionSpec = { pageSlide(if (targetState.isNotEmpty() && initialState.isEmpty()) 1 else if (targetState.isEmpty()) -1 else 0).using(SizeTransform(clip = false) { _, _ -> snap() }) }, label = "settingsPage") { sc ->
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        AnimatedContent(cat, Modifier.fillMaxWidth(), transitionSpec = { pageSlide(if (targetState.isNotEmpty() && initialState.isEmpty()) 1 else if (targetState.isEmpty()) -1 else 0).using(SizeTransform(clip = false) { _, _ -> snap() }) }, label = "settingsPage") { sc ->
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (sc.isEmpty()) {
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text(tr("Search settings", "Ayarlarda ara")) },
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
@@ -358,10 +360,10 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             val hideOn = sleepHide != "0"
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(tr("Hide the pill after it has been asleep", "Uyuduktan sonra pill gizlensin"), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                Switch(hideOn, { Prefs.pillSleepHide.value = if (it) "120" else "0" })
+                Switch(hideOn, { Prefs.pillSleepHide.value = if (it) "10" else "0" })
             }
             if (hideOn) {
-                var secs by remember { mutableFloatStateOf((sleepHide.toFloatOrNull() ?: 120f).coerceIn(10f, 600f)) }
+                var secs by remember { mutableFloatStateOf((sleepHide.toFloatOrNull() ?: 10f).coerceIn(10f, 600f)) }
                 val shown = secs.toInt()
                 Text(tr("After ", "Süre: ") + if (shown >= 60) "${shown / 60} " + tr("min", "dk") + (if (shown % 60 != 0) " ${shown % 60} " + tr("s", "sn") else "") else "$shown " + tr("s", "sn"), style = MaterialTheme.typography.bodyMedium)
                 Slider(secs, { secs = (Math.round(it / 5f) * 5f).coerceIn(10f, 600f) }, valueRange = 10f..600f, steps = 117, onValueChangeFinished = { Prefs.pillSleepHide.value = secs.toInt().toString() })
@@ -485,6 +487,18 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                     trailingIcon = { IconButton({ pick = "attach" }) { Icon(Icons.Filled.Folder, tr("Browse", "Gözat")) } })
                 SwitchRow(R.string.chat_notes, R.string.chat_notes_sub, Prefs.chatNotes.flow.collectAsState().value) { Prefs.chatNotes.value = it }
                 if (pick.isNotEmpty()) FolderPickerDialog(if (pick == "cwd") Prefs.cwd.value else Prefs.attachDir.value, { if (pick == "cwd") Prefs.cwd.value = it else Prefs.attachDir.value = it; pick = "" }, { pick = "" })
+            }
+            if (sc == "phone") Section(R.string.phone_tools) {
+                val phoneOn = Prefs.phoneTools.flow.collectAsState().value
+                SwitchRow(R.string.phone_tools, R.string.phone_tools_sub, phoneOn) { Prefs.phoneTools.value = it; com.claudechat.phone.PhoneService.sync() }
+                if (phoneOn) {
+                    Hint(stringResource(R.string.phone_tools_hint))
+                    if (remember(tick) { com.claudechat.phone.PhoneControl.connected() }) Hint(stringResource(R.string.phone_on))
+                    else {
+                        Hint(stringResource(R.string.phone_waiting))
+                        Button({ ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text(stringResource(R.string.phone_open_access)) }
+                    }
+                }
             }
             if (sc == "ai") Section(R.string.sec_ai) {
                 val prov by Prefs.provider.flow.collectAsState()

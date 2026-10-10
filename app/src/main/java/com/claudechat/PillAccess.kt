@@ -18,7 +18,7 @@ class PillAccess : AccessibilityService() {
     override fun onUnbind(i: android.content.Intent?): Boolean { instance = null; KeepAliveService.relayout(this); return super.onUnbind(i) }
 
     companion object {
-        const val ID = "com.claudechat.app/com.claudechat.PillAccess"
+        const val ID = "com.umutk.claudechat/com.claudechat.PillAccess"
         @Volatile var instance: PillAccess? = null
 
         fun wm(c: Context): WindowManager = instance?.getSystemService(WindowManager::class.java) ?: c.getSystemService(WindowManager::class.java)

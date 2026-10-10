@@ -8,11 +8,11 @@ android {
     namespace = "com.claudechat"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.claudechat.app"
+        applicationId = "com.umutk.claudechat"
         minSdk = 29
         targetSdk = 34
-        versionCode = 62
-        versionName = "0.10.7"
+        versionCode = 106
+        versionName = "0.10.57"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {

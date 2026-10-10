@@ -72,6 +72,9 @@ fun BubblePanel(onClose: () -> Unit, onApp: () -> Unit) {
                 // taps inside the panel must not fall through to the dimmed area and close it
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
                 .consumeWindowInsets(WindowInsets.statusBars)
+                // the keyboard lifts the whole panel: the message box stays above it and inside the panel, not under it
+                .windowInsetsPadding(WindowInsets.ime)
+                .consumeWindowInsets(WindowInsets.ime)
         ) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.size(44.dp))

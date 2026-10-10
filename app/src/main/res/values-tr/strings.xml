@@ -258,4 +258,21 @@
     <string name="agent_on_sub">Claude Code gibi: aşağıdaki klasörde dosya okuyabilir, arayabilir, düzenleyebilir ve komut çalıştırabilir.</string>
     <string name="agent_root">Komutlarını root olarak çalıştır</string>
     <string name="agent_root_sub">Telefonun kendi kabuğu için (cihazda root gerekir).</string>
+    <!-- Telefon kontrolü: erişilebilirlik servisi ve "Claude telefonu kullansın" anahtarı (buddy-android'den uyarlandı, Apache-2.0) -->
+    <string name="phone_service_label">Claude Chat telefon kontrolü</string>
+    <string name="phone_service_description">\"Claude telefonu kullansın\" Claude Chat ayarlarında açıkken Claude ekranı okuyabilir; senin yerine dokunabilir, yazabilir ve kaydırabilir. Bir şey göndermeden, satın almadan ya da silmeden önce sorar. Claude\'un kendisi dışında hiçbir şey telefondan çıkmaz.</string>
+    <string name="phone_tools">Phone buddy</string>
+    <string name="phone_tools_sub">Claude ekranı okuyabilir; dokunabilir, yazabilir, kaydırabilir. Bir şey göndermeden, satın almadan ya da silmeden önce sana sorar.</string>
+    <string name="phone_tools_hint">Yerel sunucu yalnızca bu açıkken ve yalnızca bu telefonda (127.0.0.1:8765) çalışır.</string>
+    <string name="phone_on">Telefon kontrolü çalışıyor.</string>
+    <string name="phone_waiting">Erişilebilirlik ayarlarında Claude Chat telefon kontrolünü aç. Sunucu ondan sonra başlar.</string>
+    <string name="phone_open_access">Erişilebilirlik ayarlarını aç</string>
+    <string name="phone_channel">Telefon kontrolü</string>
+    <string name="phone_notice_title">Claude telefonunu kullanıyor</string>
+    <string name="phone_notice_text">İş bitene kadar ekrana dokunma, ya da devralmak için Durdur\'a bas.</string>
+    <string name="phone_stop">Durdur</string>
+    <string name="phone_stopped">Durduruldu. Telefonun yine sende.</string>
+    <string name="confirm_title">Claude bunu yapmak istiyor</string>
+    <string name="confirm_approve">Onayla</string>
+    <string name="confirm_deny">Reddet</string>
 </resources>

@@ -3,6 +3,8 @@
 // Usage: CC_TOKEN=secret node bridge.js   (port: CC_PORT, default 8787)
 const http = require('http');
 const os = require('os');
+const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
 
 const PORT = parseInt(process.env.CC_PORT || '8787', 10);
@@ -192,7 +194,7 @@ const server = http.createServer(async (req, res) => {
         else if (/\.(output|log)$/.test(e.name)) { try { const st = fs.statSync(f); if (Date.now() - st.mtimeMs < 30 * 60 * 1000 && st.size > 200) found.push({ f, m: st.mtimeMs, size: st.size }); } catch (x) {} }
       }
     };
-    walk('/tmp', 2); walk('/root/projects', 5);
+    walk('/tmp', 2); walk('/root/projects', 5); walk('/sdcard/Download/projects/_logs', 1);   // the build logs of the projects folder
     found.sort((a, b) => b.m - a.m);
     let out = { file: '', age: -1, text: '' };
     for (const c of found.slice(0, 12)) {
@@ -272,7 +274,9 @@ const server = http.createServer(async (req, res) => {
   const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(body.effort) ? body.effort : '';
   const addDir = typeof body.addDir === 'string' && body.addDir.startsWith('/') ? body.addDir : '';
   const cwd = body.cwd || '/root/projects';
-  const key = JSON.stringify([cwd, mode, model, effort, addDir, wantBypass]);
+  // phone control (Settings: "Let Claude use the phone"): the app sends the bearer token of its local MCP server on 127.0.0.1:8765
+  const phoneTok = typeof body.phoneToken === 'string' && /^[A-Za-z0-9_-]{20,128}$/.test(body.phoneToken) ? body.phoneToken : '';
+  const key = JSON.stringify([cwd, mode, model, effort, addDir, wantBypass, phoneTok]);
 
   const cur = procs.get(chat);
   const reuse = cur && cur.child.exitCode === null && !cur.sink && cur.key === key && body.session && body.session === cur.session;
@@ -284,7 +288,18 @@ const server = http.createServer(async (req, res) => {
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
     args.push('--permission-mode', mode);
-    args.push('--allowedTools', allow.join(','));
+    // -p turns cannot answer prompts, so the phone tools are allowed by server name; the approval rule (the confirm tool) lives in the server
+    if (phoneTok) {
+      try {
+        const cfg = path.join(os.tmpdir(), 'claudechat-phone-mcp.json'); // holds the token: owner-only
+        fs.writeFileSync(cfg, JSON.stringify({ mcpServers: { 'claudechat-phone': { type: 'http', url: 'http://127.0.0.1:8765/mcp', headers: { Authorization: 'Bearer ' + phoneTok } } } }), { mode: 0o600 });
+        fs.chmodSync(cfg, 0o600);
+        args.push('--mcp-config', cfg);
+      } catch (e) {
+        console.error('phone config not written: ' + e);
+      }
+    }
+    args.push('--allowedTools', (phoneTok ? allow.concat(['mcp__claudechat-phone']) : allow).join(','));
     const child = spawn('claude', args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     const p = { child, key, session: body.session ? String(body.session) : '', sink: null, buf: '', err: '', last: Date.now() };
     procs.set(chat, p);

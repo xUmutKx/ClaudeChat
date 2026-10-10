@@ -1,0 +1,20 @@
+Claude Chat
+
+This app includes phone-control code adapted from buddy-android.
+
+  Project:   buddy-android
+  Upstream:  https://github.com/ghorbelhamdi/buddy-android
+  Copyright: ghorbelhamdi (upstream author; the upstream LICENSE file has no copyright line)
+  License:   Apache License, Version 2.0. The full text is in buddy-LICENSE.txt in this folder.
+
+Adapted files (package com.claudechat.phone):
+  McpServer.java  from app/buddy/assistant/McpServer.java: local MCP server on 127.0.0.1:8765
+  Tools.java      from app/buddy/assistant/Tools.java: the phone tools (read_screen, tap, type_text, scroll, ...)
+  PhoneService.java  from app/buddy/assistant/BuddyService.java: accessibility service that hosts the server
+
+Written for Claude Chat, not copied: ConfirmActivity.java (approval dialog, in place of the upstream bubble),
+PhoneControl.java (switch and token), and the resource files phone_access.xml and the phone_* / confirm_* strings.
+
+Changes from upstream: no bubble overlay, chat hub, onboarding, Termux helper endpoints, attachment endpoint,
+lock-screen handling or keyboard tracking. Approvals are a dialog, status is a toast and the control notice is a
+plain notification. Each adapted Java file carries a header that says so.

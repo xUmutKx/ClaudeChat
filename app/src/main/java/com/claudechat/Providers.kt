@@ -37,7 +37,7 @@ object Providers {
         P("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "deepseek/deepseek-chat-v3-0324:free", "Many models, some free (':free')", "Çok model, bazıları ücretsiz (':free')", "green", "https://openrouter.ai/keys", true, "rabbit"),
         P("mistral", "Mistral", "https://api.mistral.ai/v1", "mistral-small-latest", "Free tier key", "Ücretsiz katman anahtarı", "red", "https://console.mistral.ai/api-keys", true, "cat",
             listOf("mistral-small-latest", "mistral-large-latest")),
-        P("openai", "OpenAI", "https://api.openai.com/v1", "gpt-4o-mini", "Paid API key", "Ücretli API anahtarı", "gray", "https://platform.openai.com/api-keys", true, "owl",
+        P("openai", "ChatGPT", "https://api.openai.com/v1", "gpt-4o-mini", "Paid API key", "Ücretli API anahtarı", "gray", "https://platform.openai.com/api-keys", true, "owl",
             listOf("gpt-4o-mini", "gpt-4o")),
         P("custom", "Custom", "", "", "Any OpenAI-compatible server (set address and model)", "OpenAI uyumlu herhangi bir sunucu (adres ve model gir)", "yellow", "", false, "ghost"),
     )

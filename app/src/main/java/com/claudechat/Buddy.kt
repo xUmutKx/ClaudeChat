@@ -397,7 +397,7 @@ class Buddy(base: Context) {
         cancelSleep()
         val secs = pref(Prefs.buddySleepAfter, 60)
         if (secs <= 0) return
-        sleepRun = Runnable { sleepRun = null; if (!st.running && !held) { view?.setMood(Mood.SLEEP); hideBubbleNow(); if (Prefs.buddyHideAsleep.value == "1") { asleepHidden = true; view?.visibility = View.GONE } } }.also { main.postDelayed(it, secs * 1000L) }
+        sleepRun = Runnable { sleepRun = null; if (!st.running && !held && !Engine.buildRunning.value) { view?.setMood(Mood.SLEEP); hideBubbleNow(); if (Prefs.buddyHideAsleep.value == "1") { asleepHidden = true; view?.visibility = View.GONE } } }.also { main.postDelayed(it, secs * 1000L) }
     }
 
     private fun cancelSleep() { sleepRun?.let { main.removeCallbacks(it) }; sleepRun = null }
@@ -415,8 +415,8 @@ class Buddy(base: Context) {
         val same = text == lastBubbleText && bubbleOn
         lastBubbleText = text
         if (!same) {
-            b.style(pref(Prefs.buddyBubbleSize, 13).coerceIn(9, 24), dp(pref(Prefs.buddyBubbleWidth, 230).coerceIn(120, 360)),
-                pref(Prefs.buddyBubbleLines, 5).coerceIn(1, 12), Prefs.buddyBubbleShape.value, Prefs.buddyBubbleTone.value,
+            b.style(pref(Prefs.buddyBubbleSize, 13).coerceIn(9, 24), dp(pref(Prefs.buddyBubbleWidth, 260).coerceIn(120, 360)),
+                pref(Prefs.buddyBubbleLines, 8).coerceIn(1, 14), Prefs.buddyBubbleShape.value, Prefs.buddyBubbleTone.value,
                 Prefs.buddyTail.value == "1", pref(Prefs.buddyBubbleOpacity, 96).coerceIn(30, 100))
             b.setText(text, TextView.BufferType.NORMAL)
         }
@@ -542,6 +542,8 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
     fun thud(power: Float) { thudAt = SystemClock.uptimeMillis(); thudPow = power.coerceIn(0.1f, 1f) }
 
     override fun onDraw(cv: Canvas) {
+        // phone control is connected: a small green dot at the top right of the buddy
+        if (com.claudechat.phone.PhoneControl.connected()) { p.style = Paint.Style.FILL; p.color = Color.rgb(76, 175, 80); cv.drawCircle(s * 0.86f, s * 0.14f, s * 0.07f, p) }
         val now = SystemClock.uptimeMillis()
         val t = (now - since) / 1000f
         var rot = 0f; var dy = 0f; var dx = 0f; var sx = 1f; var sy = 1f
@@ -581,7 +583,8 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
             }
             Mood.SLEEP -> {
                 face = closed
-                val br = sin(now / 1300.0).toFloat(); sy = 1f + 0.025f * br; sx = 1f - 0.012f * br; dy = 0.01f * s * br
+                // breathing would stretch the blanket too: with the blanket on, the sleeper stays still
+                val br = 0f; /* no breathing: the sleeper stays still */ sy = 1f + 0.025f * br; sx = 1f - 0.012f * br; dy = 0.01f * s * br
             }
             Mood.HELD -> { face = wow; sin(now / 120.0).let { rot = it.toFloat() * 3f } }
             Mood.WOW -> { face = wow; val k = (1f - (now - since) / 900f).coerceIn(0f, 1f); sx = 1f + 0.18f * k; sy = 1f + 0.18f * k; rot = sin(t * 40.0).toFloat() * 6f * k }
@@ -591,7 +594,7 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
         if (now < thudAt + 450) { val k = 1f - (now - thudAt) / 450f; val sq = sin((now - thudAt) / 45.0).toFloat() * 0.16f * thudPow * k; sx *= 1f + sq; sy *= 1f - sq }
         val cx = s / 2f + dx; val cy = h - 0.45f * s + dy
         cv.save()
-        cv.translate(cx, cy); cv.rotate(rot); cv.scale(sx, sy)
+        cv.translate(cx, cy); cv.rotate(rot) // no grow or shrink in any mood
         face?.draw(cv)
         if (mood == Mood.SLEEP && blanketOn) {
             // the blanket is pulled up over the body when it falls asleep (about a second), then stays
@@ -650,12 +653,13 @@ private class BubbleView(c: Context) : TextView(c) {
     private val d = c.resources.displayMetrics.density
     private val tailH get() = if (tail) 7 * d else 0f
 
-    init { setWillNotDraw(false); typeface = Typeface.create("sans-serif", Typeface.NORMAL); ellipsize = TextUtils.TruncateAt.END }
+    // the whole message is shown (up to the line limit, then it scrolls) instead of being cut to "..." after one line
+    init { setWillNotDraw(false); typeface = Typeface.create("sans-serif", Typeface.NORMAL); ellipsize = null; movementMethod = android.text.method.ScrollingMovementMethod.getInstance() }
 
     fun style(sp: Int, maxW: Int, lines: Int, shape: String, tone: String, tail: Boolean, opacity: Int) {
         this.shape = shape; this.tone = tone; this.tail = tail; this.op = opacity
         textSize = sp.toFloat(); maxWidth = maxW; maxLines = lines
-        setTextColor(when (tone) { "dark" -> 0xFFF1EEEA.toInt(); "orange" -> Color.WHITE; else -> 0xFF1F1B18.toInt() })
+        setTextColor(when (tone) { "dark" -> 0xFFF1EEEA.toInt(); "orange" -> Color.WHITE; else -> Color.WHITE })
         pad()
     }
 
@@ -669,9 +673,9 @@ private class BubbleView(c: Context) : TextView(c) {
     override fun onDraw(cv: Canvas) {
         val body = RectF(1f, if (tailUp) tailH else 1f, width - 1f, height - (if (tailUp) 1f else tailH))
         val r = when (shape) { "sharp" -> 4 * d; "soft" -> 14 * d; else -> minOf(body.height() / 2f, 24 * d) }
-        val col = when (tone) { "dark" -> 0xFF2B2724.toInt(); "orange" -> 0xFFD97757.toInt(); else -> 0xFFFFFFFF.toInt() }
+        val col = when (tone) { "dark" -> 0xFF2B2724.toInt(); "orange" -> 0xFFD97757.toInt(); else -> 0xFF000000.toInt() }
         bg.color = col; bg.alpha = (255 * op / 100f).toInt()
-        line.color = when (tone) { "dark" -> 0xFF4A443F.toInt(); "orange" -> 0xFFB85F42.toInt(); else -> 0xFFDAD3CC.toInt() }; line.strokeWidth = d; line.alpha = bg.alpha
+        line.color = when (tone) { "dark" -> 0xFF4A443F.toInt(); "orange" -> 0xFFB85F42.toInt(); else -> 0xFF3A3A3A.toInt() }; line.strokeWidth = d; line.alpha = bg.alpha
         cv.drawRoundRect(body, r, r, bg); cv.drawRoundRect(body, r, r, line)
         if (tail) {
             val tx = tailX.coerceIn(r + 6 * d, width - r - 6 * d)

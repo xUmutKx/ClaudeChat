@@ -2,4 +2,5 @@
 <paths>
     <cache-path name="apk" path="apk/" />
     <cache-path name="studio" path="studio/" />
+    <external-path name="shared" path="." />
 </paths>

@@ -1,5 +1,6 @@
 package com.claudechat
 
+import androidx.compose.animation.core.animateFloat
 import android.text.format.DateUtils
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -28,6 +29,9 @@ fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
     val chats by Engine.chats.collectAsState()
     val cur by Engine.currentId.collectAsState()
     val busy by Engine.busy.collectAsState()
+    val states by Engine.chatState.collectAsState()
+    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "halo").animateFloat(0.35f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900), androidx.compose.animation.core.RepeatMode.Reverse), label = "haloA")
     val list = chats.filter { it.title.isNotEmpty() }.sortedByDescending { it.updated }
     var del by remember { mutableStateOf<Chat?>(null) }
 
@@ -45,8 +49,17 @@ fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
         LazyColumn(Modifier.fillMaxSize()) {
             items(list, key = { it.id }) { c ->
                 Row(Modifier.fillMaxWidth().clickable { Engine.openChat(c.id); onOpen() }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(46.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-                        Mascot(c.id in busy, Modifier.size(28.dp, 20.dp))
+                    val st = if (c.id in busy) Status.Working else states[c.id] ?: Status.Idle
+                    val halo = when (st) { Status.Working -> androidx.compose.ui.graphics.Color(0xFF4FC3F7); Status.Done -> androidx.compose.ui.graphics.Color(0xFF66BB6A); Status.Error, Status.Offline -> androidx.compose.ui.graphics.Color(0xFFEF5350); else -> null }
+                    Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                        if (halo != null) androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                            val a = if (st == Status.Working) pulse else 1f
+                            drawCircle(halo.copy(alpha = 0.22f * a), size.minDimension / 2)
+                            drawCircle(halo.copy(alpha = a), size.minDimension / 2 - 1.5.dp.toPx(), style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx()))
+                        }
+                        Box(Modifier.size(46.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+                            MascotLook(Wear.lookOf(c.id, cur), Modifier.size(34.dp, 30.dp))
+                        }
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {

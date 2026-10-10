@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -194,7 +195,11 @@ fun BuildBar(onOpen: () -> Unit) {
     var st by remember { mutableStateOf<BuildState?>(null) }
     LaunchedEffect(Unit) { while (true) { st = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Engine.buildLog()?.let { buildState(it) } }; delay(3000) } }
     val b = st ?: return
-    if (!b.running) return
+    if (!b.running) {
+        // a finished build: its APK is offered right here as a file to install
+        if (b.ok) ApkChip(b.project)
+        return
+    }
     val el = liveElapsed(b)
     Column(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 18.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -202,6 +207,23 @@ fun BuildBar(onOpen: () -> Unit) {
             Text((BUILD_STEPS.getOrNull(b.reached)?.first ?: "…") + (if (el >= 0) "  ·  " + clockText(el) else ""), fontSize = 12.sp, color = cs.primary)
         }
         LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 3.dp).height(3.dp).clip(RoundedCornerShape(2.dp)), color = cs.primary)
+    }
+}
+
+/** The APK of a finished build, as a tappable file card (tap = install). */
+@Composable
+private fun ApkChip(project: String) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val name = project.removeSuffix(".log").removeSuffix("_build")
+    val f = remember(name) { java.io.File("/sdcard/Download/projects/latest/$name.apk") }
+    if (!f.isFile) return
+    androidx.compose.material3.Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp).clickable { TermuxInstall.install(ctx, f) }) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.Icon(Icons.Filled.Android, null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Text("$name.apk", fontSize = 14.sp)
+        }
     }
 }
 

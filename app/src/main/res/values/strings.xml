@@ -258,4 +258,21 @@
     <string name="agent_on_sub">Like Claude Code: it can read, search, edit files and run commands in the folder below.</string>
     <string name="agent_root">Run its commands as root</string>
     <string name="agent_root_sub">For the phone\'s own shell (needs root on the device).</string>
+    <!-- Phone control: the accessibility service and the "Phone buddy" switch (code adapted from buddy-android, Apache-2.0) -->
+    <string name="phone_service_label">Claude Chat phone control</string>
+    <string name="phone_service_description">Lets Claude read the screen and tap, type and scroll for you while \"Phone buddy\" is on in Claude Chat settings. Claude asks before it sends, buys or deletes anything. Nothing leaves the phone except what Claude itself sends to Claude.</string>
+    <string name="phone_tools">Phone buddy</string>
+    <string name="phone_tools_sub">Claude can read the screen and tap, type and scroll. It asks you before sending, buying or deleting.</string>
+    <string name="phone_tools_hint">The local server runs only while this is on, and only on this phone (127.0.0.1:8765).</string>
+    <string name="phone_on">Phone control is running.</string>
+    <string name="phone_waiting">Turn on Claude Chat phone control in the accessibility settings. The server starts after that.</string>
+    <string name="phone_open_access">Open accessibility settings</string>
+    <string name="phone_channel">Phone control</string>
+    <string name="phone_notice_title">Claude is using your phone</string>
+    <string name="phone_notice_text">Don\'t touch the screen until it\'s done, or tap Stop to take over.</string>
+    <string name="phone_stop">Stop</string>
+    <string name="phone_stopped">Stopped. Your phone is yours again.</string>
+    <string name="confirm_title">Claude wants to do this</string>
+    <string name="confirm_approve">Approve</string>
+    <string name="confirm_deny">Deny</string>
 </resources>

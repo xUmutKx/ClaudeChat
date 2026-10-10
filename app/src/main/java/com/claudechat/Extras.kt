@@ -18,6 +18,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -189,15 +192,20 @@ fun ChatBackground(modifier: Modifier = Modifier, style: String? = null) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CustomizeSheet(onDismiss: () -> Unit) {
-    val outfit by Prefs.pillOutfit.flow.collectAsState()
     val dance by Prefs.danceMode.flow.collectAsState()
     val pill by Prefs.pillColor.flow.collectAsState()
     val bg by Prefs.chatBg.flow.collectAsState()
     val bubble by Prefs.bubbleStyle.flow.collectAsState()
     val skin by Prefs.mascotSkin.flow.collectAsState()
+    val pose by Prefs.mascotPose.flow.collectAsState()
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(tr("Customize", "Özelleştir"), fontFamily = FontFamily.Serif, fontSize = 24.sp)
+            Loadout()
+            // the tiles are pictures only, so the picked motion's name is written once here
+            Text(tr(Poses.label(pose).first, Poses.label(pose).second), fontSize = 13.sp)
+            Chips(listOf("steps" to tr("Frame by frame", "Kare kare"), "smooth" to tr("Smooth", "Akıcı")), dance) { Prefs.danceMode.value = it }
+            Text(if (dance == "steps") tr("Each motion jumps between 8 frames.", "Her hareket 8 kare halinde oynar.") else tr("Each motion glides smoothly.", "Her hareket akıcı süzülür."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             // every state side by side, so the blue "shell is running" look can be checked without waiting for one
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
                 StatePreview(tr("Idle", "Boşta")) { Mascot(false, Modifier.size(54.dp, 39.dp), idle = true) }
@@ -206,8 +214,6 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                 StatePreview(tr("Sleep", "Uyku")) { Mascot(false, Modifier.size(54.dp, 39.dp), sleeping = true) }
             }
             CharacterPicker()
-            Label(tr("Outfit", "Kıyafet"))
-            OutfitPicker(outfit) { Prefs.pillOutfit.value = it }
             Label(tr("Scene", "Ortam"))
             ScenePicker()
             run {
@@ -224,9 +230,30 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                         .clickable { Mascots.setSkin(Mascots.current(), k) })
                 }
             }
-            Label(tr("Animation", "Animasyon"))
-            Chips(listOf("steps" to tr("Frame by frame", "Kare kare"), "smooth" to tr("Smooth", "Akıcı")), dance) { Prefs.danceMode.value = it }
             // previews only, no captions: each tile is the thing itself
+            val glow by Prefs.pillGlow.flow.collectAsState()
+            Label(tr("Glow behind the mascot", "Maskotun arkasındaki ışık"))
+            PreviewTiles(listOf("none" to tr("None", "Yok"), "cyan" to "Cyan", "pink" to tr("Pink", "Pembe"), "gold" to tr("Gold", "Altın"), "green" to tr("Green", "Yeşil")), glow, { Prefs.pillGlow.value = it }, 46, 46) { k ->
+                Box(Modifier.size(26.dp).clip(CircleShape).background(if (glowArgb(k) == 0) Color(0xFF111114) else Color(glowArgb(k))))
+            }
+            // one colour per state for the pill and the header; "rainbow" cycles through the hues
+            val buildC by Prefs.buildColor.flow.collectAsState(); val bashC by Prefs.bashColor.flow.collectAsState()
+            val thinkC by Prefs.thinkColor.flow.collectAsState(); val doneC by Prefs.doneColor.flow.collectAsState()
+            // collapsed by default: the four rows are only shown when opened
+            var colourOpen by rememberSaveable { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth().clickable { colourOpen = !colourOpen }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(tr("Colours by state", "Duruma göre renkler"), Modifier.weight(1f), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(if (colourOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null)
+            }
+            if (colourOpen) listOf(
+                Triple(tr("Build", "Derleme"), buildC, Prefs.buildColor), Triple("Bash", bashC, Prefs.bashColor),
+                Triple(tr("Thinking", "Düşünme"), thinkC, Prefs.thinkColor), Triple(tr("Done", "Bitti"), doneC, Prefs.doneColor),
+            ).forEach { (name, cur, pref) ->
+                Label(name)
+                PreviewTiles(StateColors.CHOICES.map { it.first to tr(it.second, it.third) }, cur, { pref.value = it }, 34, 34) { k ->
+                    Box(Modifier.size(20.dp).clip(CircleShape).background(stateBrush(k)))
+                }
+            }
             PreviewTiles(listOf("black" to tr("Black", "Siyah"), "white" to tr("White", "Beyaz")), pill, { Prefs.pillColor.value = it }) { k ->
                 Box(Modifier.size(54.dp, 20.dp).clip(RoundedCornerShape(10.dp)).background(if (k == "white") Color(0xFFF2F2F5) else Color(0xFF111114)), contentAlignment = Alignment.Center) {
                     Mascot(false, Modifier.size(24.dp, 16.dp), idle = true)
@@ -252,15 +279,113 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
     }
 }
 
+/** TF2-style loadout: the big mascot in the middle, slots on its left and right. Tap a slot and its items show in the row below. */
+@Composable
+private fun Loadout() {
+    var slot by rememberSaveable { mutableStateOf("hat") }
+    val pose by Prefs.mascotPose.flow.collectAsState()
+    val hat by Prefs.pillOutfit.flow.collectAsState(); val face by Prefs.wearFace.flow.collectAsState()
+    val eyes by Prefs.eyeColor.flow.collectAsState(); val body by Prefs.wearBody.flow.collectAsState()
+    val legs by Prefs.wearLegs.flow.collectAsState(); val feet by Prefs.wearFeet.flow.collectAsState()
+    val cur = mapOf("hat" to hat, "face" to face, "eyes" to eyes, "body" to body, "legs" to legs, "feet" to feet, "anim" to pose)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { listOf("hat", "face", "eyes").forEach { s -> SlotButton(s, cur.getValue(s), slot) { slot = s } } }
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { PosedMascot(pose, Modifier.size(170.dp, 140.dp)) }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { listOf("body", "legs", "feet", "anim").forEach { s -> SlotButton(s, cur.getValue(s), slot) { slot = s } } }
+    }
+    Label(slotName(slot))
+    PreviewTiles(slotItems(slot).map { it to it }, cur.getValue(slot), { pick(slot, it) }, 56, 60) { k -> SlotTile(slot, k) }
+    // says what the picked item is, right under the row (the tiles are pictures only)
+    Text(itemLabel(slot, cur.getValue(slot)), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun SlotButton(slot: String, current: String, selected: String, onClick: () -> Unit) {
+    Column(Modifier.size(56.dp, 60.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        .then(if (slot == selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
+        .clickable(onClick = onClick)
+        .semantics { contentDescription = slotName(slot) }, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(slotShort(slot), fontSize = 9.sp, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) { SlotTile(slot, current) }
+    }
+}
+
+/** A short name for the box, shown on top of it. */
+private fun slotShort(slot: String) = when (slot) {
+    "hat" -> tr("Hat", "Şapka"); "face" -> tr("Face", "Yüz"); "eyes" -> tr("Eyes", "Göz"); "body" -> tr("Body", "Gövde")
+    "legs" -> tr("Pants", "Pantolon"); "anim" -> tr("Idle", "Boşta"); else -> tr("Feet", "Ayak")
+}
+
+/** The hat slot previews on the bare mascot; the other slots use the same tile as before. */
+@Composable
+private fun SlotTile(slot: String, k: String) {
+    // the item itself, no mascot around it; the idle animation keeps its mascot preview
+    if (slot == "anim") { PosedMascot(k, Modifier.fillMaxSize().padding(6.dp)); return }
+    val ch = Mascots.current()
+    val res = when (slot) { "hat" -> Outfit.hat(k); "face" -> Wear.faceRes(k, ch); "eyes" -> Wear.eyeRes(k, ch); else -> Wear.res(k, ch) }
+    when {
+        k == "none" -> Text("—", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center))
+        res != 0 -> Image(painterResource(res), null, Modifier.fillMaxSize().padding(4.dp))
+        else -> Text(k.take(6), fontSize = 9.sp, modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center))
+    }
+}
+
+private fun slotItems(slot: String): List<String> = when (slot) {
+    "anim" -> Poses.ALL; "hat" -> Outfit.ALL; "face" -> Wear.FACE; "eyes" -> Wear.EYES; "body" -> Wear.BODY; "legs" -> Wear.LEGS; else -> Wear.FEET
+}
+
+private fun slotName(slot: String) = when (slot) {
+    "hat" -> tr("Hat", "Şapka"); "face" -> tr("Face", "Yüz"); "eyes" -> tr("Eyes", "Gözler")
+    "body" -> tr("Body", "Gövde"); "legs" -> tr("Trousers", "Pantolon"); "anim" -> tr("Idle animation", "Boşta animasyonu")
+    else -> tr("Shoes and socks", "Ayakkabı ve çorap")
+}
+
+private fun itemLabel(slot: String, k: String): String = when {
+    slot == "anim" -> Poses.label(k).let { tr(it.first, it.second) }
+    k == "none" -> tr("None", "Yok")
+    else -> k.replaceFirstChar { it.uppercase() }
+}
+
+private fun pick(slot: String, k: String) {
+    when (slot) {
+        "anim" -> Prefs.mascotPose.value = k
+        "hat" -> Prefs.pillOutfit.value = k; "face" -> Prefs.wearFace.value = k; "eyes" -> Prefs.eyeColor.value = k
+        "body" -> Prefs.wearBody.value = k; "legs" -> Prefs.wearLegs.value = k; else -> Prefs.wearFeet.value = k
+    }
+    Wear.saveCurrent()
+}
+
+/** One tile: the mascot wearing just this piece. */
+@Composable
+private fun WearTile(style: String) {
+    val skin by Prefs.mascotSkin.flow.collectAsState()
+    val tint = remember(skin) { Outfit.skinMatrix(skin)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
+    val ch = Mascots.current()
+    Box(Modifier.fillMaxSize().padding(5.dp)) {
+        Image(painterResource(Mascots.preview(ch)), null, Modifier.fillMaxSize(), colorFilter = tint)
+        Wear.res(style, ch).let { if (it != 0) Image(painterResource(it), null, Modifier.fillMaxSize()) }
+        Wear.layers("none", "none", "none", style.takeIf { it == "glasses" || it == "mustache" } ?: "none", style.takeIf { it in Wear.EYES } ?: "dark", ch).forEach { Image(painterResource(it), null, Modifier.fillMaxSize()) }
+    }
+}
+
+/** A colour chip for the Customize picker: one colour, or a rainbow sweep for "rainbow". */
+private fun stateBrush(k: String): androidx.compose.ui.graphics.Brush =
+    if (k == "rainbow") androidx.compose.ui.graphics.Brush.sweepGradient(listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red))
+    else androidx.compose.ui.graphics.SolidColor(Color(StateColors.tileColor(k)))
+
 /** Tiles that show the option itself (no caption). The name is only read out by screen readers. */
 @Composable
 private fun PreviewTiles(items: List<Pair<String, String>>, current: String, onPick: (String) -> Unit, tileW: Int = 64, tileH: Int = 52, tile: @Composable (String) -> Unit) {
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { (k, name) ->
             val on = current == k
-            Box(Modifier.size(tileW.dp, tileH.dp).clip(RoundedCornerShape(14.dp))
+            // the tile grows a little while it is pressed: the tap is visible, and small tiles are easier to hit
+            val src = remember { MutableInteractionSource() }
+            val pressed by src.collectIsPressedAsState()
+            val grow by animateFloatAsState(if (pressed) 1.12f else 1f, label = "tilePress")
+            Box(Modifier.size(tileW.dp, tileH.dp).graphicsLayer { scaleX = grow; scaleY = grow }.clip(RoundedCornerShape(14.dp))
                 .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
-                .clickable { onPick(k) }
+                .clickable(interactionSource = src, indication = null) { onPick(k) }
                 .semantics { contentDescription = name }, contentAlignment = Alignment.Center) { tile(k) }
         }
     }
@@ -536,28 +661,6 @@ private fun Cmd(cmd: String, clip: androidx.compose.ui.platform.ClipboardManager
     }
 }
 
-/** Outfit choices drawn on the mascot itself instead of named in text. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun OutfitPicker(selected: String, onPick: (String) -> Unit) {
-    val skin by Prefs.mascotSkin.flow.collectAsState()
-    val tint = remember(skin) { Outfit.skinMatrix(skin)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Outfit.ALL.forEach { k ->
-            val on = selected == k
-            Box(Modifier.size(64.dp, 58.dp).clip(RoundedCornerShape(14.dp))
-                .background(if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest)
-                .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
-                .clickable { onPick(k) }, contentAlignment = Alignment.Center) {
-                Box(Modifier.size(50.dp, 45.dp)) {
-                    Image(painterResource(Mascots.r(R.drawable.ic_mascot18)), null, Modifier.fillMaxSize(), colorFilter = tint)
-                    val h = Outfit.hat(k); if (h != 0) Image(painterResource(h), null, Modifier.fillMaxSize().hatFit())
-                }
-            }
-        }
-    }
-}
-
 /** Scenes behind the mascot, shown as pictures with the mascot in them. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -594,7 +697,12 @@ fun AboutCard() {
     val ver = remember { try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "" } catch (e: Exception) { "" } }
     val code = remember { try { androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(ctx.packageManager.getPackageInfo(ctx.packageName, 0)) } catch (e: Exception) { 0L } }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        PlayMascot(Modifier.fillMaxWidth().height(280.dp))
+        var taps by remember { mutableIntStateOf(0) }
+        var room by remember { mutableStateOf(false) }
+        PlayMascot(Modifier.fillMaxWidth().height(280.dp), onTap = { taps++; if (taps >= 10) { taps = 0; room = true } })
+        if (room) androidx.compose.ui.window.Dialog({ room = false }, androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(color = Color.Black) { Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) { MascotRoom(); RoomShop() } }
+        }
         Text("Claude Chat", fontFamily = FontFamily.Serif, fontSize = 28.sp)
         Text("by UmutK", fontSize = 16.sp, color = cs.primary, fontWeight = FontWeight.Medium)
         Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceContainer) {
@@ -606,13 +714,16 @@ fun AboutCard() {
             }
         }
         OutlinedButton({ ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/xUmutKx")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }, Modifier.fillMaxWidth()) { Text("GitHub · xUmutKx") }
+        for ((label, url) in listOf("Phone control adapted from buddy-android (Apache-2.0)" to "https://github.com/ghorbelhamdi/buddy-android")) {
+            OutlinedButton({ ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text(label) }
+        }
         Text(tr("Claude Code on your phone, through a local bridge in Termux. Nothing is sent anywhere except to Claude itself.", "Telefonda Claude Code, Termux'taki yerel bir köprü üzerinden. Claude'un kendisi dışında hiçbir yere bir şey gönderilmez."), fontSize = 12.sp, color = cs.onSurfaceVariant)
     }
 }
 
 /** Easter egg: the mascot dances in a glow; hold it and it follows the finger like a jelly toy (spring physics), let go and it flies, spins and bounces off the walls. */
 @Composable
-private fun PlayMascot(modifier: Modifier) {
+private fun PlayMascot(modifier: Modifier, onTap: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val dens = androidx.compose.ui.platform.LocalDensity.current
     val mw = with(dens) { 104.dp.toPx() }; val mh = with(dens) { 94.dp.toPx() }
@@ -661,7 +772,7 @@ private fun PlayMascot(modifier: Modifier) {
     }
     val glow = cs.primary
     Box(modifier.onSizeChanged { area = it }
-        .pointerInput(Unit) { detectTapGestures(onTap = { av += if (vel.x >= 0) 720f else -720f }) }
+        .pointerInput(Unit) { detectTapGestures(onTap = { av += if (vel.x >= 0) 720f else -720f; onTap() }) }
         .pointerInput(Unit) {
             detectDragGesturesAfterLongPress(
                 onDragStart = { target = it; held = true },

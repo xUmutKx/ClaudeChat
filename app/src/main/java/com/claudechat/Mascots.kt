@@ -85,13 +85,14 @@ object Mascots {
     }
 
     /** Face in its colour, the blanket when asleep, the hat fitted: one picture, for places that only take a picture (the notification). */
-    fun bitmap(ctx: Context, faces: List<Int>, hatRes: Int, blanket: Boolean, w: Int = 100, h: Int = 90): Bitmap {
+    fun bitmap(ctx: Context, faces: List<Int>, hatRes: Int, blanket: Boolean, worn: List<Int> = emptyList(), w: Int = 100, h: Int = 90): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888); val cv = Canvas(bmp)
         for (res in faces) {
             val face = ContextCompat.getDrawable(ctx, res)!!.mutate()
             Outfit.skinMatrix()?.let { face.colorFilter = ColorMatrixColorFilter(it) }
             face.setBounds(0, 0, w, h); face.draw(cv)
         }
+        for (res in worn) { val g = ContextCompat.getDrawable(ctx, res)!!.mutate(); g.setBounds(0, 0, w, h); g.draw(cv) }   // clothes and glasses: their own colours, no skin tint
         if (blanket) { val b = ContextCompat.getDrawable(ctx, R.drawable.ic_blanket)!!.mutate(); b.setBounds(0, 0, w, h); b.draw(cv) }
         if (hatRes != 0) { val d = hat(ctx, hatRes); d.setBounds(0, 0, w, h); d.draw(cv) }
         return bmp

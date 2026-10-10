@@ -79,8 +79,17 @@ object TermuxInstall {
             c.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${c.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }
-        val uri = FileProvider.getUriForFile(c, "${c.packageName}.files", f)
-        c.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        // the installer runs as another user and cannot read files that only the owner group can (EACCES): copy it into our own cache first
+        try {
+            val dir = java.io.File(c.cacheDir, "apk").apply { mkdirs() }
+            val copy = java.io.File(dir, f.name)
+            f.inputStream().use { i -> copy.outputStream().use { o -> i.copyTo(o) } }
+            val uri = FileProvider.getUriForFile(c, "${c.packageName}.files", copy)
+            c.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            // the file could not be read or shared: say so instead of closing the app
+            android.widget.Toast.makeText(c, "Could not open the APK: ${e.message ?: e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 }

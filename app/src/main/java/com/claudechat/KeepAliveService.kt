@@ -108,7 +108,7 @@ class KeepAliveService : Service() {
             ).collect { overlay.refreshBlack() }
         }
         scope.launch { // pill look changed (colour, gap, outfit): rebuild it
-            kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillExtra.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { }, Prefs.pillEvents.flow.map { }, Prefs.pillHold.flow.map { }, Prefs.pillHandle.flow.map { })
+            kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGlow.flow.map { }, Prefs.mascotPose.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillExtra.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { }, Prefs.pillEvents.flow.map { }, Prefs.pillHold.flow.map { }, Prefs.pillHandle.flow.map { })
                 .drop(7).collect { overlay.onRotate(); startFg(fgText, fgWorking ?: false) }
         }
         scope.launch { // the buddy was switched on or off, or the mascot moved house (pill <-> buddy): draw both again
@@ -128,6 +128,8 @@ class KeepAliveService : Service() {
         }
         scope.launch { Engine.demoShell.collect { overlay.redraw(); startFg(fgText, fgWorking ?: false) } }
         scope.launch { Engine.shell.collect { startFg(fgText, fgWorking ?: false) } }
+        // a build starts or ends: the notification changes at once, instead of keeping the last "Done"
+        scope.launch { Engine.buildRunning.collect { startFg(label(lastSt, ""), lastSt.running) } }
         scope.launch { Prefs.mascotSkin.flow.collect { overlay.redraw(); startFg(fgText, fgWorking ?: false) } }
         scope.launch { kotlinx.coroutines.flow.merge(Prefs.mascotChar.flow.map { }, Prefs.provider.flow.map { }).drop(2).collect { overlay.redraw(); overlay.buddy.refresh(); startFg(fgText, fgWorking ?: false) } }
         scope.launch { combine(AppState.foreground, Engine.demoShell) { fg, demo -> fg && !demo }.collect { overlay.setQuiet(it) } } // the shell preview also shows on the pill // chat open: its header mascot shows the status, so the pill hides
@@ -135,7 +137,8 @@ class KeepAliveService : Service() {
 
     private data class Snap(val st: Status, val det: String, val last: String, val style: String, val keep: Boolean)
 
-    private fun label(st: Status, det: String) = when (st) {
+    // a running build is what the notification is about, whatever Claude's own status says
+    private fun label(st: Status, det: String) = if (Engine.buildRunning.value) tr("Compiling", "Derleniyor") else when (st) {
         Status.Working, Status.Background -> det.ifEmpty { getString(R.string.status_working) }
         Status.Done -> getString(R.string.status_done)
         Status.Error -> getString(R.string.status_error)
@@ -151,7 +154,8 @@ class KeepAliveService : Service() {
         lastSt = s.st
         startFg(label(s.st, s.det), s.st.running)
         overlay.render(s.style, s.st, s.det, s.last)
-        val hold = s.keep || s.st.running
+        // the CPU wake lock is held only while Claude works; the service itself can still stay up for Termux
+        val hold = s.st.running
         if (hold && wl == null) {
             wl = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "claudechat:keep").apply { acquire() }
         } else if (!hold) {
@@ -175,17 +179,21 @@ class KeepAliveService : Service() {
         return android.widget.RemoteViews(packageName, layout).apply {
             setTextViewText(R.id.ntitle, getString(R.string.notif_keep_title))
             setTextViewText(R.id.ntext, text)
+            // the notification shade is white by day and dark by night: the text follows the system mode
+            val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+            val ink = if (night) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+            setTextColor(R.id.ntitle, ink); setTextColor(R.id.ntext, ink)
             val hat = Outfit.hat()
             val ids = if (pc) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2) else if (working) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2, R.id.m3 to R.id.h3, R.id.m4 to R.id.h4) else listOf(R.id.m1 to R.id.h1)
             if (Prefs.showNotifMascot.value != "1") ids.forEach { (m, h) -> setViewVisibility(m, android.view.View.GONE); setViewVisibility(h, android.view.View.GONE) }
             else {
                 // a notification only takes pictures: the face in its colour, the blanket when idle (asleep, like the pill and the header) and the hat fitted, in one
-                val asleep = layout == R.layout.notif_still && lastSt == Status.Idle
+                val asleep = layout == R.layout.notif_still && lastSt == Status.Idle && !Engine.buildRunning.value
                 val blanket = asleep && Prefs.buddyBlanket.value == "1"
                 ids.forEachIndexed { i, (m, h) ->
                     val faces = if (pc) Mascots.pc(i == 1)
                         else listOf(if (asleep) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18))
-                    setImageViewBitmap(m, Mascots.bitmap(this@KeepAliveService, faces, hat, blanket))
+                    setImageViewBitmap(m, Mascots.bitmap(this@KeepAliveService, faces, hat, blanket, if (pc) emptyList() else Wear.worn(asleep)))
                     setViewVisibility(h, android.view.View.GONE)
                 }
             }
@@ -200,7 +208,7 @@ class KeepAliveService : Service() {
             .setSmallIcon(Outfit.statIcon())
             .setContentTitle(getString(R.string.notif_keep_title))
             .setContentText(text)
-            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            // no decorated style: the system does not wrap our layout in its own dark pill
             .setCustomContentView(view(text, working))
             .setPriority(NotificationCompat.PRIORITY_MIN).setVisibility(NotificationCompat.VISIBILITY_SECRET).setOngoing(true).setOnlyAlertOnce(true).setContentIntent(Notifier.open(this))
             .addAction(0, getString(R.string.notif_stop),

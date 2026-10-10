@@ -80,6 +80,17 @@ object Prefs {
     lateinit var blackSize: S    // clock size, sp
     lateinit var danceMode: S    // mascot animation: steps (frame by frame) / smooth
     lateinit var pillColor: S   // pill background: black / white
+    lateinit var pillGlow: S    // soft light behind the mascot in the pill: none / cyan / pink / gold / green
+    lateinit var roomRug: S     // the easter-egg room: rug, wall picture and plant chosen in its shop
+    lateinit var roomArt: S
+    lateinit var roomPlant: S
+    lateinit var roomOwned: S   // bought decorations, "slot:name" separated by commas
+    lateinit var roomFrag: S    // code fragments, earned by the room's activities and spent in its shop
+    lateinit var guideHidden: S // "1" once the first-run guide was dismissed
+    lateinit var buildColor: S  // pill outside and header ring while a build runs (StateColors keys)
+    lateinit var doneColor: S   // pill outside and header ring when Claude is done
+    lateinit var bashColor: S   // while Claude runs a Bash command
+    lateinit var thinkColor: S  // while Claude thinks
     lateinit var agentTools: B   // let other AIs use files and commands
     lateinit var agentRoot: B    // run their commands as root
     lateinit var agentDir: S     // the folder they may work in
@@ -99,6 +110,12 @@ object Prefs {
     lateinit var pillHold: S         // seconds the event pill stays open (1..15)
     lateinit var sceneInPill: S      // "1": the chosen scene is also drawn behind the mascot in the pill
     lateinit var pillOutfit: S   // mascot outfit: none / wizard / crown / party / bow
+    lateinit var wearFeet: S     // shoes: none / sneakers / boots / socks
+    lateinit var wearLegs: S     // trousers: none / jeans / shorts
+    lateinit var wearBody: S     // none / cape / scarf / belt / bowtie
+    lateinit var wearFace: S     // none / glasses / mustache
+    lateinit var mascotPose: S   // idle / jump / read / pc: how the mascot moves while it waits
+    lateinit var eyeColor: S     // dark / blue / green / purple / red / gold
     lateinit var pillSleepHide: S // seconds after finishing until the sleeping pill hides itself (0 = never, slider 10..600)
     lateinit var pillExtra: S    // extra pill length at each end, px
     lateinit var mascotSkin: S   // body colour of the character on screen now (Mascots.syncSkin keeps it in step)
@@ -136,6 +153,7 @@ object Prefs {
     lateinit var keepAlive: B
     lateinit var autoStart: B
     lateinit var chatNotes: B
+    lateinit var phoneTools: B   // Claude may read the screen and tap/type/scroll (starts the local phone-control server)
     lateinit var screenOn: B    // keep the screen on while the curtain is showing
 
     fun init(c: Context) {
@@ -168,6 +186,14 @@ object Prefs {
         blackStyle = S("blackStyle", "digital")
         danceMode = S("danceMode", "steps")
         pillColor = S("pillColor", "black")
+        pillGlow = S("pillGlow", "none")
+        roomRug = S("roomRug", "plain"); roomArt = S("roomArt", "none"); roomPlant = S("roomPlant", "bonsai")
+        roomOwned = S("roomOwned", "rug:plain,art:none,plant:bonsai"); roomFrag = S("roomFrag", "0")
+        guideHidden = S("guideHidden", "0")
+        buildColor = S("buildColor", "pink")
+        doneColor = S("doneColor", "green")
+        bashColor = S("bashColor", "blue")
+        thinkColor = S("thinkColor", "white")
         pillGap = S("pillGap", "1")
         pillBubble = S("pillBubble", "1")
         mascotChar = S("mascotChar", "auto")
@@ -187,7 +213,12 @@ object Prefs {
         pillAlpha = S("pillAlpha", "100")
         sceneInPill = S("sceneInPill", "0")
         pillOutfit = S("pillOutfit", "none")
-        pillSleepHide = S("pillSleepSecs", "120")
+        wearFeet = S("wearFeet", "none"); wearLegs = S("wearLegs", "none"); wearBody = S("wearBody", "none")
+        wearFace = S("wearFace", "none"); eyeColor = S("eyeColor", "dark")
+        mascotPose = S("mascotPose", "idle")
+        // sunglasses moved from the hat slot to the face slot
+        if (pillOutfit.value == "shades") { pillOutfit.value = "none"; wearFace.value = "sunglasses" }
+        pillSleepHide = S("pillSleepSecs", "10")
         pillExtra = S("pillExtra", "0")
         mascotSkin = S("mascotSkin", "orange")
         mascotSkins = S("mascotSkins", "")
@@ -200,8 +231,8 @@ object Prefs {
         buddyBubble = S("buddyBubble", "1")
         buddyBubbleWork = S("buddyBubbleWork", "1")
         buddyBubbleSize = S("buddyBubbleSize", "13")
-        buddyBubbleWidth = S("buddyBubbleWidth", "230")
-        buddyBubbleLines = S("buddyBubbleLines", "5")
+        buddyBubbleWidth = S("buddyBubbleWidth", "260")
+        buddyBubbleLines = S("buddyBubbleLines", "8")
         buddyBubbleHold = S("buddyBubbleHold", "12")
         buddyBubbleOpacity = S("buddyBubbleOpacity", "96")
         buddyBubbleShape = S("buddyBubbleShape", "pill")
@@ -224,6 +255,7 @@ object Prefs {
         keepAlive = B("keepAlive", true)
         autoStart = B("autoStart", true)
         chatNotes = B("chatNotes", true)
+        phoneTools = B("phoneTools", false)
         screenOn = B("screenOn", true)
         if (token.value.isEmpty()) token.value = randomToken()
         // 0.9.45: the buddy became its own switch (it can run next to the pill), and tapping the mascot opens a small chat bubble instead of the app
