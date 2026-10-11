@@ -51,6 +51,7 @@ private class Run(val id: String) {
     var nextId = 1L
     var job: Job? = null
     @Volatile var call: Call? = null
+    @Volatile var proc: Process? = null   // root mode: the su process of the running turn
     val pending = ArrayDeque<String>() // queued prompts: run when the current turn ends
 
     // per-turn streaming state
@@ -352,7 +353,7 @@ object Engine {
 
     private fun stopRun(r: Run) {
         if (r.status.value != Status.Working) return
-        r.job?.cancel(); r.call?.cancel()
+        r.job?.cancel(); r.call?.cancel(); r.proc?.destroy()
         setStatus(r, Status.Idle)
         add(r, Role.Tool, appStr(R.string.stopped)); save(r)
         drain(r)
@@ -474,6 +475,9 @@ object Engine {
         try {
             val pv = Providers.current()
             if (pv.id != "claude") { direct(r, pv); return }
+            // the wizard's other two ways: no Termux, no bridge
+            if (Prefs.setupMode.value == SetupMode.API) { apiChat(r); return }
+            if (Prefs.setupMode.value == SetupMode.ROOT) { rootChat(r, prompt); return }
             val p = ping()
             if (p != 200) {
                 if (!Prefs.autoStart.value) return fail(r, appStr(R.string.err_offline, Prefs.port.value), Status.Offline)
@@ -496,6 +500,48 @@ object Engine {
             if (e is ConnectException) fail(r, appStr(R.string.err_offline, Prefs.port.value), Status.Offline)
             else fail(r, e.message ?: e.javaClass.simpleName)
         }
+    }
+
+    /** API mode: text only, no tools; the conversation so far goes to the Messages API as it is. */
+    private suspend fun apiChat(r: Run) {
+        setDetail(r, "")
+        try {
+            val msgs = JSONArray()
+            r.messages.value.filter { (it.role == Role.User || it.role == Role.Claude) && it.text.isNotBlank() }.takeLast(40)
+                .forEach { msgs.put(JSONObject().put("role", if (it.role == Role.User) "user" else "assistant").put("content", it.text)) }
+            withContext(Dispatchers.IO) { AnthropicApi.stream(msgs) { appendClaude(r, it) } }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (!currentCoroutineContext().isActive) return
+            return fail(r, e.message ?: e.javaClass.simpleName)
+        }
+        if (r.status.value == Status.Working) finish(r, Status.Done)
+    }
+
+    /** Root mode: the claude binary runs through su, one process per turn. Its stream-json output goes through the same handler as the bridge's. */
+    private suspend fun rootChat(r: Run, prompt: String) {
+        setDetail(r, "")
+        fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
+        val resume = sessionOf(r.id).filter { it.isLetterOrDigit() || it == '-' }.takeIf { it.isNotEmpty() }?.let { " --resume $it" }.orEmpty()
+        val allow = "Bash(git:*),Bash(gh:*),Bash(gradle:*),Bash(node:*),Bash(cd:*),Bash(export:*)"
+        val cmd = "cd ${q(Prefs.cwd.value)} && exec ${q(RootMode.BIN)} -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages$resume --permission-mode acceptEdits --allowedTools ${q(allow)}"
+        val proc = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()   // stderr merged: non-JSON lines are kept as the error text
+        r.proc = proc
+        var junk = ""
+        val code = withContext(Dispatchers.IO) {
+            try {
+                proc.outputStream.bufferedWriter().use { w ->
+                    w.write(JSONObject().put("type", "user").put("message", JSONObject().put("role", "user").put("content", prompt)).toString()); w.write("\n")
+                }
+                proc.inputStream.bufferedReader().forEachLine { line ->
+                    if (line.startsWith("{")) handle(r, line, false) else if (line.isNotBlank()) junk = (junk + "\n" + line).takeLast(400)
+                }
+                proc.waitFor()
+            } finally { proc.destroy() }
+        }
+        if (r.status.value != Status.Working) return
+        if (code != 0 && !r.gotResult) fail(r, junk.trim().ifEmpty { "claude exited with code $code" }) else finish(r, Status.Done)
     }
 
     /** A question to the user before a tool changes something: shown as a dialog in the chat. */

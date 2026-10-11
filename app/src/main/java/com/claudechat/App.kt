@@ -101,6 +101,7 @@ object Prefs {
     lateinit var mascotChar: S   // auto (follows the AI) / claude / whale / rabbit / ...
     lateinit var provider: S     // claude / gemini / deepseek / ...
     lateinit var provCfg: S      // JSON: per provider key, model, base
+    lateinit var setupMode: S    // how Claude runs: termux (default) | root | api, chosen in the setup wizard
     lateinit var studio: B       // Studio mode: pictures as SVG / pixel art
     lateinit var agentCall: B    // "on": the sub-agents of a running turn show as a video call (tiles) instead of the strip
     lateinit var agentGrid: B    // "on": running sub-agents show as square mascot tiles above the composer (off by default)
@@ -171,6 +172,8 @@ object Prefs {
         mode = S("mode", "acceptEdits")
         cwd = S("cwd", "/root/projects")
         attachDir = S("attachDir", "/sdcard/Download/projects/uploads")
+        // one-time: the old default (Download/projects) sent uploads to the wrong folder
+        if (attachDir.value.isBlank() || attachDir.value == "/sdcard/Download/projects") attachDir.value = "/sdcard/Download/projects/uploads"
         model = S("model", "")
         effort = S("effort", "")
         slash = S("slash", "")
@@ -213,6 +216,7 @@ object Prefs {
         agentDir = S("agentDir", "/sdcard/Download/projects")
         provider = S("provider", "claude")
         provCfg = S("provCfg", "{}")
+        setupMode = S("setupMode", "termux")
         studio = B("studio", false)
         agentCall = B("agentCall", false)
         agentGrid = B("agentGrid", false)

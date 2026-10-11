@@ -86,11 +86,25 @@ object TermuxInstall {
             val copy = java.io.File(dir, f.name)
             f.inputStream().use { i -> copy.outputStream().use { o -> i.copyTo(o) } }
             val uri = FileProvider.getUriForFile(c, "${c.packageName}.files", copy)
-            c.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+            val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            view.clipData = android.content.ClipData.newRawUri("", uri)
+            try {
+                c.startActivity(Intent(view).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (e: android.content.ActivityNotFoundException) {
+                // direct view refused (no default installer answers it): let the user pick any installer
+                c.startActivity(Intent.createChooser(view, f.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
         } catch (e: Exception) {
-            // the file could not be read or shared: say so instead of closing the app
-            android.widget.Toast.makeText(c, "Could not open the APK: ${e.message ?: e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
+            // still failing: keep a copy the user can open from Files, and say where it is
+            val why = e.message ?: e.javaClass.simpleName
+            try {
+                val dl = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                val saved = File(dl, f.name).also { o -> f.inputStream().use { i -> o.outputStream().use { i.copyTo(it) } } }
+                android.widget.Toast.makeText(c, "Could not open the installer ($why). Saved to ${saved.absolutePath}", android.widget.Toast.LENGTH_LONG).show()
+            } catch (e2: Exception) {
+                android.widget.Toast.makeText(c, "Could not open the APK: $why", android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 }

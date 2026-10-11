@@ -122,6 +122,12 @@
     <string name="sec_keep">Stay alive</string>
     <string name="keep_service">Keep running in background</string>
     <string name="guide_title">Stop Termux from closing</string>
+    <string name="guide_what_title">What this is</string>
+    <string name="guide_what_body">Claude Chat talks to a small server inside Termux on this phone. Your Claude Code login stays here.</string>
+    <string name="guide_start_title">Start the bridge</string>
+    <string name="guide_start_body">Install Termux (F-Droid or GitHub), open it once, then tap Start Claude below.</string>
+    <string name="guide_tip_title">Tip</string>
+    <string name="guide_tip_body">Android may close Termux in the background. See Settings, Stay alive.</string>
     <string name="guide_intro">Android kills background processes aggressively. Do these steps once; together they fix most random Termux closures.</string>
     <string name="g_battery_title">1. Battery: unrestricted</string>
     <string name="g_battery_body">Exempt both Claude Chat and Termux from battery optimization. On Samsung also add them to Settings → Battery → Background usage limits → Never sleeping apps.</string>

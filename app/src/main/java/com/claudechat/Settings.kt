@@ -200,6 +200,8 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
     var cat by rememberSaveable { mutableStateOf("") } // "" = the list of categories
     var query by rememberSaveable { mutableStateOf("") }
     BackHandler(cat.isNotEmpty()) { cat = "" }
+    // one entry per installed plugin (effortless and ponytail get their own panels)
+    val pluginCats = installedPlugins.value.map { p -> SettingsCat("plugin:${p.name}", Icons.Filled.Extension, p.name, pluginSub(p), tr("Claude", "Claude"), p.name) }
     val cats = listOf(
         SettingsCat("conn", Icons.Filled.Link, tr("Connection", "Bağlantı"), tr("Termux bridge, port, token", "Termux köprüsü, port, anahtar"), tr("Claude", "Claude"),
             "bridge termux port token connect köprü anahtar"),
@@ -223,10 +225,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             "phone buddy telefon accessibility erişilebilirlik ekran dokunma tap screen"),
         SettingsCat("plugins", Icons.Filled.Extension, tr("Plugin store", "Eklenti mağazası"), tr("Claude Code plugins", "Claude Code eklentileri"), tr("Claude", "Claude"),
             "plugin plugins store marketplace eklenti mağaza"),
-        SettingsCat("effortless", Icons.Filled.Extension, "effortless", tr("Judge and effort", "Yargıç ve çaba"), tr("Claude", "Claude"),
-            "effortless effort judge haiku jev çaba yargıç"),
-        SettingsCat("ponytail", Icons.Filled.Extension, "ponytail", tr("Level: lite, full, ultra, off", "Seviye: lite, full, ultra, off"), tr("Claude", "Claude"),
-            "ponytail lazy level lite full ultra off tembel seviye"),
+    ) + pluginCats + listOf(
         SettingsCat("about", Icons.Filled.Info, tr("About", "Hakkında"), tr("Version, author, GitHub", "Sürüm, yapımcı, GitHub"), tr("About", "Hakkında"),
             "version author github sürüm yapımcı"),
     )
@@ -501,8 +500,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 if (pick.isNotEmpty()) FolderPickerDialog(if (pick == "cwd") Prefs.cwd.value else Prefs.attachDir.value, { if (pick == "cwd") Prefs.cwd.value = it else Prefs.attachDir.value = it; pick = "" }, { pick = "" })
             }
             if (sc == "plugins") Section(R.string.sec_claude) { PluginStore() }
-            if (sc == "effortless") EffortlessSettings()
-            if (sc == "ponytail") PonytailSettings()
+            if (sc.startsWith("plugin:")) PluginPage(sc.removePrefix("plugin:"))
             if (sc == "phone") Section(R.string.phone_tools) {
                 val phoneOn = Prefs.phoneTools.flow.collectAsState().value
                 SwitchRow(R.string.phone_tools, R.string.phone_tools_sub, phoneOn) { Prefs.phoneTools.value = it; com.claudechat.phone.PhoneService.sync() }

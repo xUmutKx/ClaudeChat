@@ -576,7 +576,8 @@ private fun CopyBtn(text: String) {
 private fun AttChip(a: Att, onRemove: () -> Unit) {
     val ctx = LocalContext.current
     val thumb by produceState<Bitmap?>(null, a.uri) {
-        value = withContext(Dispatchers.IO) { try { ctx.contentResolver.loadThumbnail(a.uri, Size(120, 120), null) } catch (e: Exception) { null } }
+        // a plain file now (not a MediaStore item), so decode it directly; non-images give null and show the icon
+        value = withContext(Dispatchers.IO) { try { android.graphics.BitmapFactory.decodeFile(a.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 }) } catch (e: Exception) { null } }
     }
     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(Modifier.padding(start = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -786,7 +787,7 @@ private fun ToolGroup(g: List<Msg>) {
 }
 
 @Composable
-private fun ToolItem(m: Msg) {
+internal fun ToolItem(m: Msg) {
     val cs = MaterialTheme.colorScheme
     var show by rememberSaveable(m.id) { mutableStateOf(false) }
     Column(Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = m.detail.isNotBlank()) { show = !show }) {
@@ -866,24 +867,25 @@ private fun OptionsSheet(onDismiss: () -> Unit) {
     }
 }
 
-/** The first-run guide: what Claude Chat talks to and the four steps to get there. Hidden for good once dismissed. */
+/** The first-run guide: three short cards (what it is, how to start the bridge, one tip). Hidden for good once dismissed. */
 @Composable
 private fun FirstRunGuide() {
     val hidden by Prefs.guideHidden.flow.collectAsState()
     if (hidden == "1") return
-    Surface(Modifier.padding(top = 20.dp), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(tr("How this works", "Nasıl çalışır"), style = MaterialTheme.typography.titleSmall)
-            Text(tr("Claude Chat talks to a small server inside Termux on this phone only. Claude Code runs there with your own login. Nothing leaves the phone except what Claude itself sends.",
-                "Claude Chat, bu telefondaki Termux içinde çalışan küçük bir sunucuyla konuşur. Claude Code orada senin kendi girişinle çalışır. Claude'un kendisi dışında telefondan hiçbir şey çıkmaz."),
-                style = MaterialTheme.typography.bodySmall)
-            listOf(
-                tr("1. Install Termux (F-Droid or GitHub, not the old Play Store build).", "1. Termux'u kur (F-Droid ya da GitHub; eski Play Store sürümü değil)."),
-                tr("2. Open Termux once and let it finish its first setup.", "2. Termux'u bir kez aç ve ilk kurulumun bitmesini bekle."),
-                tr("3. Tap \"Start Claude\" below. Allow Termux commands when asked.", "3. Aşağıdaki \"Claude'u başlat\" düğmesine dokun. İstenirse Termux komutlarına izin ver."),
-                tr("4. In Termux, run `claude` once and sign in with your Claude account.", "4. Termux'ta `claude` komutunu bir kez çalıştır ve Claude hesabınla giriş yap."),
-            ).forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-            TextButton({ Prefs.guideHidden.value = "1" }) { Text(tr("Got it", "Anladım")) }
+    Column(Modifier.padding(top = 20.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        GuideCard(R.string.guide_what_title, R.string.guide_what_body)
+        GuideCard(R.string.guide_start_title, R.string.guide_start_body)
+        GuideCard(R.string.guide_tip_title, R.string.guide_tip_body)
+        TextButton({ Prefs.guideHidden.value = "1" }) { Text(tr("Got it", "Anladım")) }
+    }
+}
+
+@Composable
+private fun GuideCard(title: Int, body: Int) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(title), style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(body), style = MaterialTheme.typography.bodySmall)
         }
     }
 }

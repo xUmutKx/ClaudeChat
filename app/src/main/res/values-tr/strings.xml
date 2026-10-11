@@ -122,6 +122,12 @@
     <string name="sec_keep">Açık kalma</string>
     <string name="keep_service">Arka planda çalışmaya devam et</string>
     <string name="guide_title">Termux kapanmasın</string>
+    <string name="guide_what_title">Bu nedir</string>
+    <string name="guide_what_body">Claude Chat, bu telefondaki Termux içinde çalışan küçük bir sunucuyla konuşur. Claude Code girişin burada kalır.</string>
+    <string name="guide_start_title">Köprüyü başlat</string>
+    <string name="guide_start_body">Termux\'u kur (F-Droid ya da GitHub), bir kez aç, sonra aşağıdaki Claude\'u başlat düğmesine dokun.</string>
+    <string name="guide_tip_title">İpucu</string>
+    <string name="guide_tip_body">Android Termux\'u arka planda kapatabilir. Ayarlar, Açık kalma bölümünde çözümler var.</string>
     <string name="guide_intro">Android arka plan işlemlerini sert öldürür. Bu adımları bir kez yap; rastgele Termux kapanmalarının çoğunu çözerler.</string>
     <string name="g_battery_title">1. Pil: kısıtlama yok</string>
     <string name="g_battery_body">Claude Chat ve Termux\'u pil optimizasyonundan çıkar. Samsung\'ta ayrıca Ayarlar → Pil → Arka plan kullanım sınırları → Asla uyumayan uygulamalar listesine ekle.</string>

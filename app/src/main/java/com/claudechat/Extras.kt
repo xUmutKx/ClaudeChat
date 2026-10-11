@@ -1,5 +1,9 @@
 package com.claudechat
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
 import androidx.compose.animation.core.*
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.*
@@ -490,7 +494,7 @@ private fun Loadout() {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { listOf("body", "legs", "feet", "anim").forEach { s -> SlotButton(s, cur.getValue(s), slot) { slot = s } } }
     }
     Label(slotName(slot))
-    PreviewTiles(slotItems(slot).map { it to it }, cur.getValue(slot), { pick(slot, it) }, 56, 60) { k -> SlotTile(slot, k) }
+    PreviewTiles(slotItems(slot).map { it to it }, cur.getValue(slot), { pick(slot, it) }, 56, 60, rows = if (slot == "hat") 2 else 1) { k -> SlotTile(slot, k) }
     // says what the picked item is, right under the row (the tiles are pictures only)
     Text(itemLabel(slot, cur.getValue(slot)), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
@@ -571,9 +575,8 @@ private fun stateBrush(k: String): androidx.compose.ui.graphics.Brush =
 
 /** Tiles that show the option itself (no caption). The name is only read out by screen readers. */
 @Composable
-private fun PreviewTiles(items: List<Pair<String, String>>, current: String, onPick: (String) -> Unit, tileW: Int = 64, tileH: Int = 52, tile: @Composable (String) -> Unit) {
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items.forEach { (k, name) ->
+private fun PreviewTiles(items: List<Pair<String, String>>, current: String, onPick: (String) -> Unit, tileW: Int = 64, tileH: Int = 52, rows: Int = 1, tile: @Composable (String) -> Unit) {
+    @Composable fun Tile(k: String, name: String) {
             val on = current == k
             // the tile grows a little while it is pressed: the tap is visible, and small tiles are easier to hit
             val src = remember { MutableInteractionSource() }
@@ -583,8 +586,16 @@ private fun PreviewTiles(items: List<Pair<String, String>>, current: String, onP
                 .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
                 .clickable(interactionSource = src, indication = null) { onPick(k) }
                 .semantics { contentDescription = name }, contentAlignment = Alignment.Center) { tile(k) }
-        }
     }
+    // one row scrolls sideways; two rows fill a grid that scrolls sideways (used for hats, which are too many for one line)
+    if (rows <= 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items.forEach { (k, name) -> Tile(k, name) }
+    } else LazyHorizontalGrid(
+        rows = GridCells.Fixed(rows),
+        modifier = Modifier.fillMaxWidth().height((tileH * rows + 8 * (rows - 1) + 12).dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+    ) { items(items) { (k, name) -> Tile(k, name) } }
 }
 
 /** The characters, shown as pictures (no names, no explanations), each in its own colour. The first one, "A", follows whichever AI answers. */

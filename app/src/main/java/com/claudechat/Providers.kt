@@ -46,7 +46,7 @@ object Providers {
     fun current() = byId(Prefs.provider.value)
 
     private fun cfg() = try { JSONObject(Prefs.provCfg.value) } catch (e: Exception) { JSONObject() }
-    private fun field(id: String, k: String, def: String = "") = cfg().optJSONObject(id)?.optString(k, def)?.takeIf { it.isNotEmpty() } ?: def
+    fun field(id: String, k: String, def: String = "") = cfg().optJSONObject(id)?.optString(k, def)?.takeIf { it.isNotEmpty() } ?: def
     fun key(id: String) = field(id, "key")
     fun model(p: P) = field(p.id, "model", p.model)
     fun base(p: P) = field(p.id, "base", p.base).trimEnd('/')
