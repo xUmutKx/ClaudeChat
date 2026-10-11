@@ -184,6 +184,7 @@ final class McpServer {
                     return res.put("result", new JSONObject().put("tools", handler.listTools()));
                 case "tools/call": {
                     String name = params.optString("name");
+                    com.claudechat.phone.PhoneControl.lastUse = System.currentTimeMillis();
                     JSONObject args = params.optJSONObject("arguments");
                     if (args == null) args = new JSONObject();
                     JSONObject result;

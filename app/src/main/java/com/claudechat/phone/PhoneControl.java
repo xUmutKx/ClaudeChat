@@ -38,8 +38,16 @@ public final class PhoneControl {
         return t;
     }
 
+    /** Time of the last phone-tool call (set by the server). The green dot shows only for a short while after one. */
+    public static volatile long lastUse = 0L;
+
     /** True while the accessibility service is connected (the server can run). */
     public static boolean connected() {
         return PhoneService.instance() != null;
+    }
+
+    /** True only when the phone tools were really used a moment ago: connected is not enough for the dot. */
+    public static boolean inUse() {
+        return connected() && System.currentTimeMillis() - lastUse < 20_000L;
     }
 }

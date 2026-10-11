@@ -5,6 +5,8 @@ import android.text.format.DateUtils
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,6 +27,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
     val chats by Engine.chats.collectAsState()
     val cur by Engine.currentId.collectAsState()
@@ -34,6 +37,9 @@ fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
         androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900), androidx.compose.animation.core.RepeatMode.Reverse), label = "haloA")
     val list = chats.filter { it.title.isNotEmpty() }.sortedByDescending { it.updated }
     var del by remember { mutableStateOf<Chat?>(null) }
+    // long press a chat: give it a new name
+    var renaming by remember { mutableStateOf<Chat?>(null) }
+    var renameText by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).navigationBarsPadding()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -48,7 +54,7 @@ fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
         }
         LazyColumn(Modifier.fillMaxSize()) {
             items(list, key = { it.id }) { c ->
-                Row(Modifier.fillMaxWidth().clickable { Engine.openChat(c.id); onOpen() }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().combinedClickable(onClick = { Engine.openChat(c.id); onOpen() }, onLongClick = { renaming = c; renameText = c.title }).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     val st = if (c.id in busy) Status.Working else states[c.id] ?: Status.Idle
                     val halo = when (st) { Status.Working -> androidx.compose.ui.graphics.Color(0xFF4FC3F7); Status.Done -> androidx.compose.ui.graphics.Color(0xFF66BB6A); Status.Error, Status.Offline -> androidx.compose.ui.graphics.Color(0xFFEF5350); else -> null }
                     Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
@@ -73,6 +79,15 @@ fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
                 }
             }
         }
+    }
+    renaming?.let { c ->
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text(tr("Rename chat", "Sohbeti yeniden adlandır")) },
+            text = { OutlinedTextField(renameText, { renameText = it }, Modifier.fillMaxWidth(), singleLine = true) },
+            confirmButton = { TextButton({ Engine.renameChat(c.id, renameText); renaming = null }) { Text(tr("Save", "Kaydet")) } },
+            dismissButton = { TextButton({ renaming = null }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
     del?.let { c ->
         AlertDialog(

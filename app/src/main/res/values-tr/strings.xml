@@ -28,6 +28,7 @@
     <string name="err_termux_perm">Termux erişimi henüz ayarlanmamış. Ayarlar → Termux bağlantısı bölümüne bak.</string>
     <string name="err_token">Köprü anahtarı reddetti. Ayarlar\'dan köprüyü yeniden başlat.</string>
     <string name="err_exit">Claude %1$d koduyla kapandı.\n%2$s</string>
+    <string name="err_no_claude">Termux\'ta Claude Code (claude komutu) yok. Termux\'ta çalıştır: npm install -g @anthropic-ai/claude-code. Sonra Ayarlar → Bağlantıyı onar bölümünü kullan.</string>
     <string name="notif_channel_keep">Açık tutma</string>
     <string name="notif_channel_done">Biten cevaplar</string>
     <string name="notif_keep_title">Claude Chat çalışıyor</string>
@@ -101,6 +102,15 @@
     <string name="auto_start">Köprüyü otomatik başlat</string>
     <string name="chat_notes">Eski sohbetleri hatırla</string>
     <string name="chat_notes_sub">Yeni sohbetlere son sohbetlerin kısa notları eklenir (tam metin değil)</string>
+    <string name="model_line">Kutunun altında model ve bağlam göster</string>
+    <string name="model_line_sub">Model adı ve sohbetin bağlamının ne kadar dolu olduğu</string>
+    <string name="effort_auto_info">Effortless her mesaj için eforu kendisi seçer. effortless modunda Oto\'yu açın.</string>
+    <string name="effort_info_default">Bu model için Claude Code\'un kendi varsayılan efor düzeyi.</string>
+    <string name="effort_info_low">En hızlı yanıtlar, en az düşünme.</string>
+    <string name="effort_info_medium">Hız ile düşünme arasında denge.</string>
+    <string name="effort_info_high">Zor sorular için daha fazla düşünme.</string>
+    <string name="effort_info_xhigh">Derin düşünme, daha yavaş ve daha pahalı.</string>
+    <string name="effort_info_max">Modelin yapabildiği en çok düşünme, en yavaş ve en pahalı.</string>
 
     <string name="sec_termux">Termux bağlantısı</string>
     <string name="termux_installed">Termux kurulu.</string>

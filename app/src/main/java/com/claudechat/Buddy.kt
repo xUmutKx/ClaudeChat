@@ -481,6 +481,7 @@ enum class Mood { IDLE, WORK, PC, HAPPY, ERROR, SLEEP, HELD, WOW }
 
 /** Draws the mascot itself (faces, blanket, hat, little extras) and runs all of its small animations. */
 private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c) {
+    private val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
     var mood = Mood.IDLE
         private set
     var lean = 0f                       // tilt while carried or flying
@@ -495,6 +496,7 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private var open: Drawable? = null; private var closed: Drawable? = null; private var x: Drawable? = null
     private var happy: Drawable? = null; private var wow: Drawable? = null; private var blanket: Drawable? = null; private var hat: Drawable? = null
+    private var wear: List<Drawable> = emptyList()   // glasses, shoes, clothes: the same chosen pieces as the header and pill
     private var pc1: Drawable? = null; private var pc2: Drawable? = null
     private val blanketOn get() = Prefs.buddyBlanket.value == "1"
     private val idleOn get() = Prefs.buddyIdle.value == "1"
@@ -508,8 +510,9 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
         pc1 = pcFace(false); pc2 = pcFace(true)
         blanket = ContextCompat.getDrawable(c, R.drawable.ic_blanket)!!.mutate()
         val hid = Outfit.hat(); hat = if (hid != 0) Mascots.hat(c, hid) else null
+        wear = Wear.worn(false).map { ContextCompat.getDrawable(c, it)!!.mutate() }
         val dw = s; val dh = (s * 0.9f).toInt()
-        for (d in listOf(open, closed, x, happy, wow, blanket, hat, pc1, pc2)) d?.setBounds(-dw / 2, -dh / 2, dw / 2, dh / 2)
+        for (d in listOf(open, closed, x, happy, wow, blanket, hat, pc1, pc2) + wear) d?.setBounds(-dw / 2, -dh / 2, dw / 2, dh / 2)
     }
 
     private val tick = object : Runnable {
@@ -542,8 +545,8 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
     fun thud(power: Float) { thudAt = SystemClock.uptimeMillis(); thudPow = power.coerceIn(0.1f, 1f) }
 
     override fun onDraw(cv: Canvas) {
-        // phone control is connected: a small green dot at the top right of the buddy
-        if (com.claudechat.phone.PhoneControl.connected()) { p.style = Paint.Style.FILL; p.color = Color.rgb(76, 175, 80); cv.drawCircle(s * 0.86f, s * 0.14f, s * 0.07f, p) }
+        // phone control is being used right now (not just switched on or the service enabled): a small green dot at the top right
+        if (com.claudechat.phone.PhoneControl.inUse()) { p.style = Paint.Style.FILL; p.color = Color.rgb(76, 175, 80); cv.drawCircle(s * 0.86f, s * 0.14f, s * 0.07f, p) }
         val now = SystemClock.uptimeMillis()
         val t = (now - since) / 1000f
         var rot = 0f; var dy = 0f; var dx = 0f; var sx = 1f; var sy = 1f
@@ -595,12 +598,22 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
         val cx = s / 2f + dx; val cy = h - 0.45f * s + dy
         cv.save()
         cv.translate(cx, cy); cv.rotate(rot) // no grow or shrink in any mood
+        // at the laptop the laptop goes in front of the clothes, so the bow tie sits behind it
+        val gearOnTop = mood != Mood.PC
+        if (!gearOnTop) wear.forEach { it.draw(cv) }
+        // the glow picked in Customize, behind the buddy (a soft disc, no hard edge)
+        val gl = glowArgb(Prefs.buddyGlow.value)
+        if (gl != 0) {
+            glowPaint.shader = android.graphics.RadialGradient(0f, 0f, s * 0.6f, (gl and 0x00FFFFFF) or 0x66000000, 0, android.graphics.Shader.TileMode.CLAMP)
+            cv.drawCircle(0f, 0f, s * 0.6f, glowPaint)
+        }
         face?.draw(cv)
         if (mood == Mood.SLEEP && blanketOn) {
             // the blanket is pulled up over the body when it falls asleep (about a second), then stays
             val k = ((now - since) / 900f).coerceIn(0f, 1f)
             cv.save(); cv.translate(0f, (1f - k) * s * 0.9f * 0.45f); blanket?.alpha = (255 * k).toInt(); blanket?.draw(cv); cv.restore()
         }
+        if (gearOnTop) wear.forEach { it.draw(cv) }
         hat?.draw(cv)
         cv.restore()
         when (mood) {

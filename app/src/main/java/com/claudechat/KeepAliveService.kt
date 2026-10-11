@@ -108,7 +108,7 @@ class KeepAliveService : Service() {
             ).collect { overlay.refreshBlack() }
         }
         scope.launch { // pill look changed (colour, gap, outfit): rebuild it
-            kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillGlow.flow.map { }, Prefs.mascotPose.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillExtra.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { }, Prefs.pillEvents.flow.map { }, Prefs.pillHold.flow.map { }, Prefs.pillHandle.flow.map { })
+            kotlinx.coroutines.flow.merge(Prefs.pillColor.flow.map { }, Prefs.pillBg.flow.map { }, Prefs.pillGlow.flow.map { }, Prefs.mascotPose.flow.map { }, Prefs.pillGap.flow.map { }, Prefs.pillExtra.flow.map { }, Prefs.pillOutfit.flow.map { }, Prefs.danceMode.flow.map { }, Prefs.pillEvents.flow.map { }, Prefs.pillHold.flow.map { }, Prefs.pillHandle.flow.map { })
                 .drop(7).collect { overlay.onRotate(); startFg(fgText, fgWorking ?: false) }
         }
         scope.launch { // the buddy was switched on or off, or the mascot moved house (pill <-> buddy): draw both again

@@ -33,8 +33,10 @@ object ChatLauncher {
     /** A small chat bubble over whatever app is open (default), or the whole app when the setting says so. */
     fun open(c: Context) { if (Prefs.buddyTap.value == "chat") app(c) else bubble(c) }
 
-    fun app(c: Context) {
-        c.startActivity(Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+    fun app(c: Context, screen: String? = null) {
+        val i = Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        screen?.let { i.putExtra("screen", it) }
+        c.startActivity(i)
     }
 
     fun bubble(c: Context) {
@@ -55,7 +57,7 @@ class BubbleChatActivity : ComponentActivity() {
         val clear = SystemBarStyle.auto(AColor.TRANSPARENT, AColor.TRANSPARENT)
         enableEdgeToEdge(statusBarStyle = clear, navigationBarStyle = clear)
         window.setBackgroundDrawable(ColorDrawable(AColor.TRANSPARENT))
-        setContent { ClaudeTheme { BubblePanel(onClose = { finish() }, onApp = { ChatLauncher.app(this); finish() }) } }
+        setContent { ClaudeTheme { BubblePanel(onClose = { finish() }, onApp = { ChatLauncher.app(this); finish() }, onSettings = { ChatLauncher.app(this, "settings"); finish() }) } }
     }
 
     override fun onStart() { super.onStart(); Engine.appVisible = true; AppState.foreground.value = true }
@@ -63,18 +65,16 @@ class BubbleChatActivity : ComponentActivity() {
 }
 
 @Composable
-fun BubblePanel(onClose: () -> Unit, onApp: () -> Unit) {
+fun BubblePanel(onClose: () -> Unit, onApp: () -> Unit, onSettings: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose)) {
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.7f)
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.92f)
                 .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(cs.background)
                 // taps inside the panel must not fall through to the dimmed area and close it
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
                 .consumeWindowInsets(WindowInsets.statusBars)
-                // the keyboard lifts the whole panel: the message box stays above it and inside the panel, not under it
-                .windowInsetsPadding(WindowInsets.ime)
-                .consumeWindowInsets(WindowInsets.ime)
+                // the keyboard is handled once, inside the chat screen (its message box rises above it); the panel does not add it again
         ) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.size(44.dp))
@@ -83,7 +83,7 @@ fun BubblePanel(onClose: () -> Unit, onApp: () -> Unit) {
                 }
                 IconButton(onApp, Modifier.size(44.dp)) { Icon(Icons.Filled.OpenInFull, tr("Open the app", "Uygulamayı aç")) }
             }
-            Box(Modifier.weight(1f)) { ChatScreen(onSettings = onApp, onChats = onApp, onSetup = onApp, onTasks = onApp) }
+            Box(Modifier.weight(1f)) { ChatScreen(onSettings = onSettings, onChats = onApp, onSetup = onApp, onTasks = onApp) }
         }
     }
 }

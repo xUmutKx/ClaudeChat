@@ -80,7 +80,11 @@ object Prefs {
     lateinit var blackSize: S    // clock size, sp
     lateinit var danceMode: S    // mascot animation: steps (frame by frame) / smooth
     lateinit var pillColor: S   // pill background: black / white
+    lateinit var pillBg: S      // optional moving background of the pill: none (default) / aurora / sunset / ocean / sakura
+    lateinit var ponytailLevel: S // lite | full | ultra | off
+    lateinit var effortJudge: S   // auto | haiku | jev
     lateinit var pillGlow: S    // soft light behind the mascot in the pill: none / cyan / pink / gold / green
+    lateinit var buddyGlow: S   // the same light behind the floating buddy
     lateinit var roomRug: S     // the easter-egg room: rug, wall picture and plant chosen in its shop
     lateinit var roomArt: S
     lateinit var roomPlant: S
@@ -98,6 +102,8 @@ object Prefs {
     lateinit var provider: S     // claude / gemini / deepseek / ...
     lateinit var provCfg: S      // JSON: per provider key, model, base
     lateinit var studio: B       // Studio mode: pictures as SVG / pixel art
+    lateinit var agentCall: B    // "on": the sub-agents of a running turn show as a video call (tiles) instead of the strip
+    lateinit var agentGrid: B    // "on": running sub-agents show as square mascot tiles above the composer (off by default)
     lateinit var pillBubble: S   // show the pill's messages as a speech bubble under it
     lateinit var pillGap: S      // extra room around the camera ring, dp (0..8)
     lateinit var showHeaderMascot: S // "1"/"0": mascot at the top left of the chat screen
@@ -105,7 +111,7 @@ object Prefs {
     lateinit var mascotScene: S      // background scene behind the mascot: none / beach / forest / home / library / cave / sea / plane
     lateinit var sceneDim: S         // percent of black drawn over the scene (behind the mascot), 0..90
     lateinit var pillEvents: S       // "1": the pill only appears when something changes
-    lateinit var pillBg: S           // pill background opacity, percent (0..100)
+    lateinit var pillFill: S         // pill background opacity, percent (0..100)
     lateinit var pillAlpha: S        // whole pill opacity, percent (10..100)
     lateinit var pillHold: S         // seconds the event pill stays open (1..15)
     lateinit var sceneInPill: S      // "1": the chosen scene is also drawn behind the mascot in the pill
@@ -153,6 +159,7 @@ object Prefs {
     lateinit var keepAlive: B
     lateinit var autoStart: B
     lateinit var chatNotes: B
+    lateinit var modelLine: B    // the model name and context use under the composer; off by default
     lateinit var phoneTools: B   // Claude may read the screen and tap/type/scroll (starts the local phone-control server)
     lateinit var screenOn: B    // keep the screen on while the curtain is showing
 
@@ -163,7 +170,7 @@ object Prefs {
         overlay = S("overlay", "pill")
         mode = S("mode", "acceptEdits")
         cwd = S("cwd", "/root/projects")
-        attachDir = S("attachDir", "/sdcard/Download/projects")
+        attachDir = S("attachDir", "/sdcard/Download/projects/uploads")
         model = S("model", "")
         effort = S("effort", "")
         slash = S("slash", "")
@@ -186,7 +193,11 @@ object Prefs {
         blackStyle = S("blackStyle", "digital")
         danceMode = S("danceMode", "steps")
         pillColor = S("pillColor", "black")
+        pillBg = S("pillBg", "none")
+        ponytailLevel = S("ponytailLevel", "full")
+        effortJudge = S("effortJudge", "auto")
         pillGlow = S("pillGlow", "none")
+        buddyGlow = S("buddyGlow", "none")
         roomRug = S("roomRug", "plain"); roomArt = S("roomArt", "none"); roomPlant = S("roomPlant", "bonsai")
         roomOwned = S("roomOwned", "rug:plain,art:none,plant:bonsai"); roomFrag = S("roomFrag", "0")
         guideHidden = S("guideHidden", "0")
@@ -203,13 +214,15 @@ object Prefs {
         provider = S("provider", "claude")
         provCfg = S("provCfg", "{}")
         studio = B("studio", false)
+        agentCall = B("agentCall", false)
+        agentGrid = B("agentGrid", false)
         showHeaderMascot = S("showHeaderMascot", "1")
         showNotifMascot = S("showNotifMascot", "1")
         mascotScene = S("mascotScene", "none")
         sceneDim = S("sceneDim", "35")
         pillEvents = S("pillEvents", "0")
         pillHold = S("pillHold", "4")
-        pillBg = S("pillBg", "100")
+        pillFill = S("pillFill", "100")
         pillAlpha = S("pillAlpha", "100")
         sceneInPill = S("sceneInPill", "0")
         pillOutfit = S("pillOutfit", "none")
@@ -255,6 +268,7 @@ object Prefs {
         keepAlive = B("keepAlive", true)
         autoStart = B("autoStart", true)
         chatNotes = B("chatNotes", true)
+        modelLine = B("modelLine", false)
         phoneTools = B("phoneTools", false)
         screenOn = B("screenOn", true)
         if (token.value.isEmpty()) token.value = randomToken()

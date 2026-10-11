@@ -18,11 +18,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 
 class MainActivity : ComponentActivity() {
     private val notifPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    // a screen asked for by the bubble or the pill ("settings"): the app opens straight on it
+    private val jump = mutableStateOf<String?>(null)
 
     override fun attachBaseContext(b: Context) = super.attachBaseContext(b.localized())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) jump.value = intent.getStringExtra("screen")
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -35,22 +38,28 @@ class MainActivity : ComponentActivity() {
                     enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
                 }
                 var screen by rememberSaveable { mutableStateOf("chat") }
+                LaunchedEffect(jump.value) { jump.value?.let { screen = it; jump.value = null } }
                 BackHandler(screen != "chat") { screen = if (screen == "guide" || screen == "setup" || screen == "tasks") "settings" else "chat" }
                 // going deeper slides in from the right, going back from the left (like the system settings), not a blind cross-fade
                 fun depth(s: String) = when (s) { "chat" -> 0; "settings", "chats" -> 1; else -> 2 }
-                AnimatedContent(screen, transitionSpec = { pageSlide(depth(targetState) - depth(initialState)) }, label = "screen") {
-                    when (it) {
-                        "settings" -> SettingsScreen({ screen = "chat" }, { screen = "guide" }, { recreate() }, { screen = "setup" }, { screen = "tasks" })
-                        "guide" -> GuideScreen { screen = "settings" }
-                        "setup" -> SetupScreen { screen = "chat" }
-                        "tasks" -> TaskManagerScreen { screen = "settings" }
-                        "chats" -> ChatsScreen({ screen = "chat" }, { screen = "chat" })
-                        else -> ChatScreen({ screen = "settings" }, { screen = "chats" }, { screen = "setup" }, { screen = "tasks" })
+                // first run / a missing required step: the setup wizard covers everything until Termux and Claude are ready
+                SetupGate {
+                    AnimatedContent(screen, transitionSpec = { pageSlide(depth(targetState) - depth(initialState)) }, label = "screen") {
+                        when (it) {
+                            "settings" -> SettingsScreen({ screen = "chat" }, { screen = "guide" }, { recreate() }, { screen = "setup" }, { screen = "tasks" })
+                            "guide" -> GuideScreen { screen = "settings" }
+                            "setup" -> SetupScreen { screen = "chat" }
+                            "tasks" -> TaskManagerScreen { screen = "settings" }
+                            "chats" -> ChatsScreen({ screen = "chat" }, { screen = "chat" })
+                            else -> ChatScreen({ screen = "settings" }, { screen = "chats" }, { screen = "setup" }, { screen = "tasks" })
+                        }
                     }
                 }
             }
         }
     }
+
+    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); jump.value = intent.getStringExtra("screen") }
 
     override fun onStart() { super.onStart(); Engine.appVisible = true; AppState.foreground.value = true }
     override fun onStop() { Engine.appVisible = false; AppState.foreground.value = false; super.onStop() }

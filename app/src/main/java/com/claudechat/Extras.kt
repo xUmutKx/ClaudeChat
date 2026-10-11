@@ -1,6 +1,7 @@
 package com.claudechat
 
 import androidx.compose.animation.core.*
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.*
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -16,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -28,16 +30,22 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -51,6 +59,10 @@ fun tr(en: String, trText: String) = if (Prefs.lang.value == "tr") trText else e
 fun AgentsBar() {
     val agents by Engine.agents.collectAsState()
     if (agents.isEmpty()) return
+    val grid by Prefs.agentGrid.flow.collectAsState()
+    if (grid) return // AgentGrid() draws the tiles instead
+    val call by Prefs.agentCall.flow.collectAsState()
+    if (call) { AgentCall(agents); return }
     var open by rememberSaveable { mutableStateOf(false) }
     val running = agents.count { !it.done }
     val cs = MaterialTheme.colorScheme
@@ -88,9 +100,182 @@ private fun PulseDot(c: Color) {
     Box(Modifier.size(10.dp).alpha(a).clip(CircleShape).background(c))
 }
 
+/** 1234 -> "1.2k", 1234567 -> "1.2M": short enough for a tile. */
+private fun tokenText(n: Int): String = when {
+    n >= 1_000_000 -> "%.1fM".format(n / 1_000_000f)
+    n >= 1_000 -> "%.1fk".format(n / 1_000f)
+    else -> n.toString()
+}
+
+/** Video-call stage (Settings > Agents as a video call): every agent is a small desktop window with our mascot, stacked and slightly overlapping, each with a speech bubble. The working agent is raised; finished ones dim and sleep. When an agent starts after another, the one before passes the work on with a bubble. Tap a window for its details. */
+@Composable
+private fun AgentCall(agents: List<AgentInfo>) {
+    val cs = MaterialTheme.colorScheme
+    var detailId by rememberSaveable { mutableStateOf("") }
+    var picked by rememberSaveable { mutableStateOf("") } // tapped tile: shows the Join button; same tile or background hides it
+    fun pick(id: String) { picked = if (picked == id) "" else id }
+    val speaker = agents.lastOrNull { !it.done }?.id
+    val talk = remember { mutableStateMapOf<String, String>() } // agent id -> handoff line, shown for a few seconds
+    val scope = rememberCoroutineScope()
+    var known by remember { mutableIntStateOf(agents.size) }
+    LaunchedEffect(agents.size) {
+        if (agents.size > known && agents.size >= 2) {
+            val from = agents[agents.size - 2]
+            val line = tr("passing to ${agents.last().title}", "${agents.last().title} ekibine devrediyor")
+            talk[from.id] = line
+            scope.launch { delay(4000); if (talk[from.id] == line) talk.remove(from.id) }
+        }
+        known = agents.size
+    }
+    // six at most: the speaker in front, one behind it, the rest in two middle rows at fixed spots
+    val shown = agents.take(6)
+    val fi = shown.indexOfFirst { it.id == speaker }.let { if (it < 0) shown.lastIndex else it }
+    val others = shown.indices.filter { it != fi }
+    val back = others.firstOrNull()
+    val mids = others.drop(1)
+    var folded by rememberSaveable { mutableStateOf(false) }
+    val w = LocalConfiguration.current.screenWidthDp.dp - 40.dp
+    val spot = (w - 128.dp) / 2f
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), shape = RoundedCornerShape(16.dp), color = cs.surfaceContainer) {
+        Column {
+            Row(Modifier.fillMaxWidth().clickable { folded = !folded }.padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(tr("Agents", "Ajanlar"), Modifier.weight(1f), fontSize = 12.sp, color = cs.onSurfaceVariant)
+                Icon(if (folded) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess, null, Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+            }
+            if (!folded) Box(Modifier.width(w).height(200.dp).padding(start = 8.dp).clickable { picked = "" }) {
+                back?.let { i -> CallTile(shown[i], spot - 40.dp, 0.dp, 1f, lift = false, talk = talk[shown[i].id]) { pick(shown[i].id) } }
+                mids.forEachIndexed { k, i ->
+                    val jitter = Math.floorMod(shown[i].id.hashCode(), 24).dp
+                    CallTile(shown[i], 16.dp + (w - 160.dp) / 2f * (k / 2f) + jitter, if (k % 2 == 0) 36.dp else 100.dp, 2f + k % 2, lift = false, talk = talk[shown[i].id]) { pick(shown[i].id) }
+                }
+                // the speaker sits in its room, big in front; the room is picked by its place in the list
+                val sp = shown[fi]
+                Column(Modifier.align(Alignment.TopCenter).width(200.dp).zIndex(100f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    CallBubble(sp, talk[sp.id])
+                    CloseUpCall(sp, speaking = sp.say.isNotEmpty(), roomIndex = agents.indexOf(sp) % 20 + 1,
+                        modifier = Modifier.width(200.dp).clickable { pick(sp.id) })
+                    Text(sp.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onSurfaceVariant)
+                }
+                shown.firstOrNull { it.id == picked }?.let { p ->
+                    Button(onClick = { detailId = p.id }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp).zIndex(200f),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)) { Text(tr("Join video call", "Katıl"), fontSize = 12.sp) }
+                }
+            }
+        }
+    }
+    agents.firstOrNull { it.id == detailId }?.let { a ->
+        AlertDialog(onDismissRequest = { detailId = "" }, confirmButton = { TextButton({ detailId = "" }) { Text(tr("Close", "Kapat")) } },
+            title = { Text(a.title) },
+            text = {
+                Column {
+                    Text(a.activity.ifBlank { tr("Nothing yet", "Henüz bir şey yok") })
+                    Text(when { a.done && a.err -> tr("Failed", "Hata verdi"); a.done -> tr("Finished", "Bitti"); else -> tr("Working", "Çalışıyor") },
+                        fontSize = 12.sp, color = cs.onSurfaceVariant)
+                }
+            })
+    }
+}
+
+/** The latest words of an agent, or a line passed on to the next one. */
+@Composable
+private fun CallBubble(a: AgentInfo, talk: String?) {
+    Box(Modifier.width(128.dp).height(40.dp), contentAlignment = Alignment.BottomCenter) {
+        Crossfade((talk ?: a.say.ifEmpty { a.activity }) to (talk != null)) { (t, handoff) ->
+            if (t.isNotEmpty()) SpeechBubble(t, handoff)
+        }
+    }
+}
+
+/** Little props for the video-call tiles, one per agent in turn. */
+private val AGENT_DECOR = listOf("☕", "🌵", "🎧", "📚", "🪴", "🧸", "🎮", "🔭", "🧩", "🕯️")
+
+/** One agent as a window: a bubble above it, a title bar with a status dot, our mascot below. Each agent gets its own tilt and bob rhythm (from its id). */
+@Composable
+private fun BoxScope.CallTile(a: AgentInfo, x: Dp, y: Dp, z: Float, lift: Boolean, talk: String?, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val seed = Math.floorMod(a.id.hashCode(), 1000)
+    val tilt = 0f // straight, like a video-call grid
+    val fade by animateFloatAsState(if (a.done) 0.45f else 1f, label = "fade")
+    val hop = remember { Animatable(0f) }
+    LaunchedEffect(a.say, lift) { // the speaking window hops when it says something new
+        if (lift && !a.done) { hop.animateTo(-10f, tween(120)); hop.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy)) }
+    }
+    val density = LocalDensity.current.density
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        Modifier.align(Alignment.TopStart).offset(x = x, y = y).zIndex(z)
+            .width(128.dp).graphicsLayer { alpha = fade; translationY = hop.value * density }
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        CallBubble(a, talk)
+        Column(
+            Modifier.width(128.dp).graphicsLayer { rotationZ = tilt }
+                .shadow(8.dp, shape).clip(shape).background(if (lift) cs.primaryContainer else cs.surfaceContainerHigh)
+        ) {
+            // title bar, like a desktop window
+            Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHighest).padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (a.done) Icon(Icons.Filled.Check, null, Modifier.size(10.dp), tint = Color(0xFF4CAF50)) else PulseDot(Color(0xFF2196F3))
+                Spacer(Modifier.width(5.dp))
+                Text(a.title, Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
+                Mascot(!a.done, Modifier.size(40.dp, 30.dp), sleeping = a.done)
+                // each agent keeps its own little prop (by its place in the list), so no two look the same
+                Text(AGENT_DECOR[Engine.agents.value.indexOf(a).coerceAtLeast(0) % AGENT_DECOR.size], Modifier.align(Alignment.TopEnd), fontSize = 14.sp)
+            }
+            if (a.tokens > 0) Text(tokenText(a.tokens), Modifier.padding(start = 6.dp, bottom = 3.dp), fontSize = 9.sp, color = cs.onSurfaceVariant)
+        }
+    }
+}
+
+/** Settings > Agents as tiles: each running agent is a square tile with our mascot. The newest running agent (the one speaking) is highlighted; tap shows what it last said. */
+@Composable
+fun AgentGrid() {
+    val on by Prefs.agentGrid.flow.collectAsState()
+    val agents by Engine.agents.collectAsState()
+    val running = agents.filter { !it.done }
+    if (!on || running.isEmpty()) return
+    val cs = MaterialTheme.colorScheme
+    val speaker = running.last().id
+    var detailId by rememberSaveable { mutableStateOf("") }
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        running.forEach { a ->
+            val lift = a.id == speaker
+            Column(
+                Modifier.size(84.dp).clip(RoundedCornerShape(12.dp)).background(if (lift) cs.primaryContainer else cs.surfaceContainerHigh)
+                    .clickable { detailId = a.id }.padding(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Mascot(true, Modifier.size(44.dp, 34.dp)) }
+                Text(a.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (lift) FontWeight.Bold else FontWeight.Normal)
+            }
+        }
+    }
+    running.firstOrNull { it.id == detailId }?.let { a ->
+        // there is no separate chat per sub-agent, so the tile opens what it has said and done so far
+        AlertDialog(onDismissRequest = { detailId = "" }, confirmButton = { TextButton({ detailId = "" }) { Text(tr("Close", "Kapat")) } },
+            title = { Text(a.title) },
+            text = { Text(listOf(a.kind, a.activity, a.say).filter { it.isNotBlank() }.joinToString("\n")) })
+    }
+}
+
+@Composable
+private fun SpeechBubble(text: String, handoff: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val bg = if (handoff) cs.tertiaryContainer else cs.surface
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(shape = RoundedCornerShape(10.dp), color = bg, shadowElevation = 3.dp) {
+            Text(text, Modifier.width(120.dp).padding(horizontal = 7.dp, vertical = 4.dp), fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                color = if (handoff) cs.onTertiaryContainer else cs.onSurface)
+        }
+        Box(Modifier.offset(y = (-4).dp).size(8.dp).rotate(45f).background(bg))
+    }
+}
+
 // ---------------------------------------------------------------- customize (tap the header mascot)
 
-val CHAT_BGS = listOf("none", "stars", "galaxy", "aurora", "waves")
+val CHAT_BGS = listOf("none", "stars", "galaxy", "aurora", "waves") + EXTRA_CHAT_BGS
 
 /** Chat-screen-only background; drawn behind the messages, never on the other screens. */
 @Composable
@@ -184,7 +369,7 @@ fun ChatBackground(modifier: Modifier = Modifier, style: String? = null) {
                 }
             }
         }
-        else -> {}
+        else -> if (bg in EXTRA_CHAT_BGS) ExtraChatBackground(bg, modifier, dark)
     }
 }
 
@@ -236,6 +421,11 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
             PreviewTiles(listOf("none" to tr("None", "Yok"), "cyan" to "Cyan", "pink" to tr("Pink", "Pembe"), "gold" to tr("Gold", "Altın"), "green" to tr("Green", "Yeşil")), glow, { Prefs.pillGlow.value = it }, 46, 46) { k ->
                 Box(Modifier.size(26.dp).clip(CircleShape).background(if (glowArgb(k) == 0) Color(0xFF111114) else Color(glowArgb(k))))
             }
+            val buddyGlow by Prefs.buddyGlow.flow.collectAsState()
+            Label(tr("Glow behind the buddy", "Buddy'nin arkasındaki ışık"))
+            PreviewTiles(listOf("none" to tr("None", "Yok"), "cyan" to "Cyan", "pink" to tr("Pink", "Pembe"), "gold" to tr("Gold", "Altın"), "green" to tr("Green", "Yeşil")), buddyGlow, { Prefs.buddyGlow.value = it }, 46, 46) { k ->
+                Box(Modifier.size(26.dp).clip(CircleShape).background(if (glowArgb(k) == 0) Color(0xFF111114) else Color(glowArgb(k))))
+            }
             // one colour per state for the pill and the header; "rainbow" cycles through the hues
             val buildC by Prefs.buildColor.flow.collectAsState(); val bashC by Prefs.bashColor.flow.collectAsState()
             val thinkC by Prefs.thinkColor.flow.collectAsState(); val doneC by Prefs.doneColor.flow.collectAsState()
@@ -254,12 +444,18 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                     Box(Modifier.size(20.dp).clip(CircleShape).background(stateBrush(k)))
                 }
             }
+            // optional: a moving background for the pill (off by default)
+            val pillBg by Prefs.pillBg.flow.collectAsState()
+            Label(tr("Pill background (optional)", "Pill arka planı (isteğe bağlı)"))
+            PreviewTiles(listOf("none" to tr("Off", "Kapalı"), "aurora" to tr("Aurora", "Kuzey ışığı"), "sunset" to tr("Sunset", "Gün batımı"), "ocean" to tr("Ocean", "Okyanus"), "sakura" to "Sakura"), pillBg, { Prefs.pillBg.value = it }, 46, 46) { k ->
+                Box(Modifier.size(54.dp, 20.dp).clip(RoundedCornerShape(10.dp)).background(when (k) { "aurora" -> Color(0xFF2B1B5C); "sunset" -> Color(0xFF8A3B2B); "ocean" -> Color(0xFF0F5A6B); "sakura" -> Color(0xFF5B2C3F); else -> Color(0xFF111114) }))
+            }
             PreviewTiles(listOf("black" to tr("Black", "Siyah"), "white" to tr("White", "Beyaz")), pill, { Prefs.pillColor.value = it }) { k ->
                 Box(Modifier.size(54.dp, 20.dp).clip(RoundedCornerShape(10.dp)).background(if (k == "white") Color(0xFFF2F2F5) else Color(0xFF111114)), contentAlignment = Alignment.Center) {
                     Mascot(false, Modifier.size(24.dp, 16.dp), idle = true)
                 }
             }
-            PreviewTiles(listOf("none" to tr("None", "Yok"), "stars" to tr("Stars", "Yıldızlar"), "galaxy" to tr("Galaxy", "Galaksi"), "aurora" to tr("Aurora", "Kuzey ışığı"), "waves" to tr("Waves", "Dalgalar")), bg, { Prefs.chatBg.value = it }, 46, 46) { k ->
+            PreviewTiles(listOf("none" to tr("None", "Yok"), "stars" to tr("Stars", "Yıldızlar"), "galaxy" to tr("Galaxy", "Galaksi"), "aurora" to tr("Aurora", "Kuzey ışığı"), "waves" to tr("Waves", "Dalgalar"), "snow" to tr("Snow", "Kar"), "rain" to tr("Rain", "Yağmur"), "fireflies" to tr("Fireflies", "Ateşböcekleri"), "bubbles" to tr("Bubbles", "Baloncuklar"), "sunset" to tr("Sunset", "Gün batımı"), "clouds" to tr("Clouds", "Bulutlar"), "lava" to tr("Lava", "Lav"), "confetti" to tr("Confetti", "Konfeti"), "sakura" to tr("Sakura", "Sakura"), "matrix" to tr("Code rain", "Kod yağmuru")), bg, { Prefs.chatBg.value = it }, 46, 46) { k ->
                 Box(Modifier.fillMaxSize()) {
                     ChatBackground(Modifier.fillMaxSize(), style = k)
                     Box(Modifier.padding(start = 26.dp, top = 12.dp).size(24.dp, 7.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = .35f)))
@@ -364,7 +560,7 @@ private fun WearTile(style: String) {
     Box(Modifier.fillMaxSize().padding(5.dp)) {
         Image(painterResource(Mascots.preview(ch)), null, Modifier.fillMaxSize(), colorFilter = tint)
         Wear.res(style, ch).let { if (it != 0) Image(painterResource(it), null, Modifier.fillMaxSize()) }
-        Wear.layers("none", "none", "none", style.takeIf { it == "glasses" || it == "mustache" } ?: "none", style.takeIf { it in Wear.EYES } ?: "dark", ch).forEach { Image(painterResource(it), null, Modifier.fillMaxSize()) }
+        Wear.layers("none", "none", "none", style.takeIf { it in Wear.FACE } ?: "none", style.takeIf { it in Wear.EYES } ?: "dark", ch).forEach { Image(painterResource(it), null, Modifier.fillMaxSize()) }
     }
 }
 
@@ -572,7 +768,7 @@ private fun openUrl(ctx: android.content.Context, url: String) {
  * phone's browser. Claude's answer returns over localhost by itself; GitHub shows a short code, which is copied for the user.
  */
 @Composable
-private fun SignInStep(n: Int, what: String, title: String, body: String, signedIn: Boolean, who: String, enabled: Boolean, button: String, onAuth: (Engine.Auth?) -> Unit) {
+internal fun SignInStep(n: Int, what: String, title: String, body: String, signedIn: Boolean, who: String, enabled: Boolean, button: String, big: Boolean = false, onAuth: (Engine.Auth?) -> Unit) {
     val ctx = LocalContext.current
     val clip = LocalClipboardManager.current
     val cs = MaterialTheme.colorScheme
@@ -601,7 +797,7 @@ private fun SignInStep(n: Int, what: String, title: String, body: String, signed
             Text(tr("Signed in", "Giriş yapıldı") + if (who.isNotEmpty()) " · $who" else "", color = Color(0xFF4CAF50), fontSize = 13.sp)
             OutlinedButton({ run = true }, enabled = enabled && !run) { Text(tr("Sign in again", "Yeniden giriş yap")) }
         } else if (!run) {
-            Button({ run = true }, enabled = enabled) { Text(button) }
+            Button(onClick = { run = true }, modifier = if (big) Modifier.fillMaxWidth().height(56.dp) else Modifier, enabled = enabled) { Text(button) }
             info?.takeIf { it.state == "error" }?.let { Text(it.out.takeLast(200), fontSize = 12.sp, color = cs.error) }
             if (!enabled) Text(tr("Needs the connection from step 2 first.", "Önce 2. adımdaki bağlantı gerekir."), fontSize = 12.sp, color = cs.onSurfaceVariant)
         } else {
@@ -634,7 +830,7 @@ private fun android.content.Context.requestTermuxPermission() {
 }
 
 @Composable
-private fun Step(n: Int, title: String, done: Boolean, body: String, content: @Composable ColumnScope.() -> Unit) {
+internal fun Step(n: Int, title: String, done: Boolean, body: String, content: @Composable ColumnScope.() -> Unit) {
     val cs = MaterialTheme.colorScheme
     Surface(shape = RoundedCornerShape(18.dp), color = if (done) Color(0xFF4CAF50).copy(alpha = .14f) else cs.surfaceContainer) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -697,12 +893,7 @@ fun AboutCard() {
     val ver = remember { try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "" } catch (e: Exception) { "" } }
     val code = remember { try { androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(ctx.packageManager.getPackageInfo(ctx.packageName, 0)) } catch (e: Exception) { 0L } }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        var taps by remember { mutableIntStateOf(0) }
-        var room by remember { mutableStateOf(false) }
-        PlayMascot(Modifier.fillMaxWidth().height(280.dp), onTap = { taps++; if (taps >= 10) { taps = 0; room = true } })
-        if (room) androidx.compose.ui.window.Dialog({ room = false }, androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(color = Color.Black) { Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) { MascotRoom(); RoomShop() } }
-        }
+        PlayMascot(Modifier.fillMaxWidth().height(280.dp))
         Text("Claude Chat", fontFamily = FontFamily.Serif, fontSize = 28.sp)
         Text("by UmutK", fontSize = 16.sp, color = cs.primary, fontWeight = FontWeight.Medium)
         Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceContainer) {
@@ -714,16 +905,13 @@ fun AboutCard() {
             }
         }
         OutlinedButton({ ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/xUmutKx")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }, Modifier.fillMaxWidth()) { Text("GitHub · xUmutKx") }
-        for ((label, url) in listOf("Phone control adapted from buddy-android (Apache-2.0)" to "https://github.com/ghorbelhamdi/buddy-android")) {
-            OutlinedButton({ ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text(label) }
-        }
         Text(tr("Claude Code on your phone, through a local bridge in Termux. Nothing is sent anywhere except to Claude itself.", "Telefonda Claude Code, Termux'taki yerel bir köprü üzerinden. Claude'un kendisi dışında hiçbir yere bir şey gönderilmez."), fontSize = 12.sp, color = cs.onSurfaceVariant)
     }
 }
 
-/** Easter egg: the mascot dances in a glow; hold it and it follows the finger like a jelly toy (spring physics), let go and it flies, spins and bounces off the walls. */
+/** Jelly toy on the About page: the mascot dances in a glow; hold it and it follows the finger like a jelly toy (spring physics), let go and it flies, spins and bounces off the walls. */
 @Composable
-private fun PlayMascot(modifier: Modifier, onTap: () -> Unit = {}) {
+private fun PlayMascot(modifier: Modifier) {
     val cs = MaterialTheme.colorScheme
     val dens = androidx.compose.ui.platform.LocalDensity.current
     val mw = with(dens) { 104.dp.toPx() }; val mh = with(dens) { 94.dp.toPx() }
@@ -772,7 +960,7 @@ private fun PlayMascot(modifier: Modifier, onTap: () -> Unit = {}) {
     }
     val glow = cs.primary
     Box(modifier.onSizeChanged { area = it }
-        .pointerInput(Unit) { detectTapGestures(onTap = { av += if (vel.x >= 0) 720f else -720f; onTap() }) }
+        .pointerInput(Unit) { detectTapGestures(onTap = { av += if (vel.x >= 0) 720f else -720f }) }
         .pointerInput(Unit) {
             detectDragGesturesAfterLongPress(
                 onDragStart = { target = it; held = true },

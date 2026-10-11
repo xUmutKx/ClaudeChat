@@ -40,7 +40,7 @@ object Cmds {
     fun matching(prefix: String): List<Cmd> = all().filter { it.name.startsWith(prefix.lowercase()) }
 
     val models = listOf("" to R.string.default_label, "fable" to 0, "opus" to 0, "sonnet" to 0, "haiku" to 0)
-    val efforts = listOf("", "low", "medium", "high", "xhigh", "max")
+    val efforts = listOf("", "auto", "low", "medium", "high", "xhigh", "max")
     val modes = listOf("default", "acceptEdits", "plan", "bypassPermissions")
 
     /**

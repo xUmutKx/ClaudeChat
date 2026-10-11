@@ -17,10 +17,10 @@ import org.json.JSONObject
  * and the look of every chat: the outfit in use is the working copy in Prefs, and it is kept per chat when you switch.
  */
 object Wear {
-    val FEET = listOf("none", "sneakers", "boots", "socks")
-    val LEGS = listOf("none", "jeans", "shorts")
+    val FEET = listOf("none", "sneakers", "hightops", "boots", "socks", "sandals", "clogs", "slippers")
+    val LEGS = listOf("none", "jeans", "shorts", "cargo", "overalls", "stripes", "leggings")
     val BODY = listOf("none", "cape", "scarf", "belt", "bowtie")
-    val FACE = listOf("none", "glasses", "sunglasses", "monocle", "party", "mustache", "handlebar", "curly")
+    val FACE = listOf("none", "glasses", "nerd", "sunglasses", "monocle", "eyepatch", "party", "mustache", "handlebar", "curly", "goatee", "beard")
     val EYES = listOf("dark", "blue", "green", "purple", "red", "gold")
 
     /** One mascot's clothes and face: each slot is independent, so a hat, glasses and shoes can be worn together. */

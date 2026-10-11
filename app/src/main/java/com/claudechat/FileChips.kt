@@ -60,6 +60,8 @@ private fun openFile(ctx: Context, f: File) {
         if (f.extension.equals("apk", true)) { TermuxInstall.install(ctx, f); return }
         val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase()) ?: "*/*"
-        ctx.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (_: Exception) { }
+        ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), f.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(ctx, "Could not open ${f.name}: ${e.message ?: e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
+    }
 }

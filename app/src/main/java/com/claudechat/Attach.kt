@@ -13,14 +13,15 @@ object Attach {
     private fun nameOf(c: Context, u: Uri): String? =
         c.contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
 
-    /** Copies a picked file into Download/projects (no storage permission needed for files we create). */
+    /** Copies a picked file into the attachment folder (no storage permission needed for files we create). */
     fun save(c: Context, src: Uri): Att? = try {
         val cr = c.contentResolver
         val name = nameOf(c, src) ?: "file"
         val v = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
             put(MediaStore.Downloads.MIME_TYPE, cr.getType(src) ?: "application/octet-stream")
-            put(MediaStore.Downloads.RELATIVE_PATH, "Download/projects")
+            // the chosen attachment folder (default Download/projects/uploads), so the copy and the path Claude sees are the same file
+            put(MediaStore.Downloads.RELATIVE_PATH, Prefs.attachDir.value.removePrefix("/sdcard/").trimEnd('/'))
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val dst = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v)!!

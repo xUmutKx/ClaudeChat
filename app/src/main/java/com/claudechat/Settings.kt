@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Search
 import android.net.Uri
 import android.os.Build
@@ -220,6 +221,12 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             "battery wake lock keep alive setup wizard root tweaks pil uyanık kurulum"),
         SettingsCat("phone", Icons.Filled.Smartphone, tr("Phone buddy", "Phone buddy"), tr("Let Claude use the phone", "Claude telefonu kullansın"), tr("Phone", "Telefon"),
             "phone buddy telefon accessibility erişilebilirlik ekran dokunma tap screen"),
+        SettingsCat("plugins", Icons.Filled.Extension, tr("Plugin store", "Eklenti mağazası"), tr("Claude Code plugins", "Claude Code eklentileri"), tr("Claude", "Claude"),
+            "plugin plugins store marketplace eklenti mağaza"),
+        SettingsCat("effortless", Icons.Filled.Extension, "effortless", tr("Judge and effort", "Yargıç ve çaba"), tr("Claude", "Claude"),
+            "effortless effort judge haiku jev çaba yargıç"),
+        SettingsCat("ponytail", Icons.Filled.Extension, "ponytail", tr("Level: lite, full, ultra, off", "Seviye: lite, full, ultra, off"), tr("Claude", "Claude"),
+            "ponytail lazy level lite full ultra off tembel seviye"),
         SettingsCat("about", Icons.Filled.Info, tr("About", "Hakkında"), tr("Version, author, GitHub", "Sürüm, yapımcı, GitHub"), tr("About", "Hakkında"),
             "version author github sürüm yapımcı"),
     )
@@ -345,6 +352,8 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
         if (sc == "look") Section(R.string.sec_appearance) {
             Choices(listOf("system" to R.string.theme_system, "light" to R.string.theme_light, "dark" to R.string.theme_dark, "amoled" to R.string.theme_amoled), theme) { Prefs.theme.value = it }
             Choices(listOf("en" to R.string.lang_en, "tr" to R.string.lang_tr), lang) { if (it != lang) { Prefs.lang.value = it; onLang() } }
+            val callOn by Prefs.agentCall.flow.collectAsState()
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(tr("Agents as a video call", "Ajanlar görüntülü arama gibi"), Modifier.weight(1f)); Switch(callOn, { Prefs.agentCall.value = it }) }
         }
 
         if (sc == "overlay") Section(R.string.sec_overlay) {
@@ -352,6 +361,8 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             val headerOn by Prefs.showHeaderMascot.flow.collectAsState()
             val scenePill by Prefs.sceneInPill.flow.collectAsState()
             Row(verticalAlignment = Alignment.CenterVertically) { Text(tr("Scene behind the mascot in the pill", "Pill'deki maskotun arkasında ortam"), Modifier.weight(1f)); Switch(scenePill == "1", { Prefs.sceneInPill.value = if (it) "1" else "0" }) }
+            val gridOn by Prefs.agentGrid.flow.collectAsState()
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(tr("Agents as tiles", "Ajanlar kare kutularda"), Modifier.weight(1f)); Switch(gridOn, { Prefs.agentGrid.value = it }) }
             val notifOn by Prefs.showNotifMascot.flow.collectAsState()
             Text(tr("Where the mascot shows", "Maskot nerede görünsün"), style = MaterialTheme.typography.titleSmall)
             Row(verticalAlignment = Alignment.CenterVertically) { Text(tr("Chat screen, top left", "Sohbet ekranı, sol üst"), Modifier.weight(1f)); Switch(headerOn == "1", { Prefs.showHeaderMascot.value = if (it) "1" else "0" }) }
@@ -384,10 +395,10 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                     Text(tr("Stays open ${hold.toInt()} s", "Açık kalma süresi ${hold.toInt()} sn"), style = MaterialTheme.typography.bodyLarge)
                     Slider(hold, { hold = it }, valueRange = 1f..15f, steps = 13, onValueChangeFinished = { Prefs.pillHold.value = hold.toInt().toString() })
                 }
-                val pBg by Prefs.pillBg.flow.collectAsState()
-                var bg by remember { mutableFloatStateOf((pBg.toFloatOrNull() ?: 100f).coerceIn(0f, 100f)) }
+                val pFill by Prefs.pillFill.flow.collectAsState()
+                var bg by remember { mutableFloatStateOf((pFill.toFloatOrNull() ?: 100f).coerceIn(0f, 100f)) }
                 Text(tr("Pill background: ${bg.toInt()}% opaque", "Pill arka planı: %${bg.toInt()} opak"), style = MaterialTheme.typography.bodyLarge)
-                Slider(bg, { bg = it; Prefs.pillBg.value = it.toInt().toString() }, valueRange = 0f..100f)
+                Slider(bg, { bg = it; Prefs.pillFill.value = it.toInt().toString() }, valueRange = 0f..100f)
                 val pAll by Prefs.pillAlpha.flow.collectAsState()
                 var all by remember { mutableFloatStateOf((pAll.toFloatOrNull() ?: 100f).coerceIn(10f, 100f)) }
                 Text(tr("Whole pill: ${all.toInt()}% opaque", "Tüm pill: %${all.toInt()} opak"), style = MaterialTheme.typography.bodyLarge)
@@ -486,8 +497,12 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 OutlinedTextField(Prefs.attachDir.value, { Prefs.attachDir.value = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.attach_dir)) }, singleLine = true,
                     trailingIcon = { IconButton({ pick = "attach" }) { Icon(Icons.Filled.Folder, tr("Browse", "Gözat")) } })
                 SwitchRow(R.string.chat_notes, R.string.chat_notes_sub, Prefs.chatNotes.flow.collectAsState().value) { Prefs.chatNotes.value = it }
+                SwitchRow(R.string.model_line, R.string.model_line_sub, Prefs.modelLine.flow.collectAsState().value) { Prefs.modelLine.value = it }
                 if (pick.isNotEmpty()) FolderPickerDialog(if (pick == "cwd") Prefs.cwd.value else Prefs.attachDir.value, { if (pick == "cwd") Prefs.cwd.value = it else Prefs.attachDir.value = it; pick = "" }, { pick = "" })
             }
+            if (sc == "plugins") Section(R.string.sec_claude) { PluginStore() }
+            if (sc == "effortless") EffortlessSettings()
+            if (sc == "ponytail") PonytailSettings()
             if (sc == "phone") Section(R.string.phone_tools) {
                 val phoneOn = Prefs.phoneTools.flow.collectAsState().value
                 SwitchRow(R.string.phone_tools, R.string.phone_tools_sub, phoneOn) { Prefs.phoneTools.value = it; com.claudechat.phone.PhoneService.sync() }

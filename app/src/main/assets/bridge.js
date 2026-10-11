@@ -6,6 +6,10 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+// bin/claude.exe runs under proot (verified with --version); the linux-arm64 package binary hits a Bun Bus error here, so it is only the fallback.
+const CLAUDE_BIN = '/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe';
+const CLAUDE_NATIVE = '/usr/local/lib/node_modules/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-linux-arm64/claude';
+const CLAUDE = fs.existsSync(CLAUDE_BIN) ? CLAUDE_BIN : fs.existsSync(CLAUDE_NATIVE) ? CLAUDE_NATIVE : 'claude';
 
 const PORT = parseInt(process.env.CC_PORT || '8787', 10);
 const TOKEN = process.env.CC_TOKEN || '';
@@ -46,7 +50,7 @@ function makeTitle(user, reply) {
     let done = false;
     const finish = (t) => { if (!done) { done = true; resolve(t); } };
     let child;
-    try { child = spawn('claude', ['-p', '--model', 'haiku'], { cwd: os.tmpdir(), stdio: ['pipe', 'pipe', 'ignore'] }); }
+    try { child = spawn(CLAUDE, ['-p', '--model', 'haiku'], { cwd: os.tmpdir(), stdio: ['pipe', 'pipe', 'ignore'] }); }
     catch (e) { return finish(''); }
     const timer = setTimeout(() => { try { child.kill('SIGTERM'); } catch (e) {} finish(''); }, 50000);
     child.on('error', () => { clearTimeout(timer); finish(''); });
@@ -63,7 +67,7 @@ function makeTitle(user, reply) {
 const fs2 = require('fs'), path2 = require('path'), { execFile } = require('child_process');
 const LOGIN_DIR = path2.join(process.env.HOME || '/root', 'claudechat');
 const stripAnsi = (t) => t.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\r/g, '');
-const LOGIN_CMD = { claude: 'claude auth login', gh: 'gh auth login -h github.com -p https -w' };
+const LOGIN_CMD = { claude: CLAUDE + ' auth login', gh: 'gh auth login -h github.com -p https -w' };
 const logins = {}; // 'claude' | 'gh' -> { child, url, code, out, state, started, pressed }
 
 function ensureOpener() {
@@ -127,12 +131,13 @@ function run(cmd, args, ms) {
 }
 
 async function authStatus() {
-  const [c, g] = await Promise.all([run('claude', ['auth', 'status']), run('gh', ['auth', 'status'])]);
+  const [c, g] = await Promise.all([run(CLAUDE, ['auth', 'status']), run('gh', ['auth', 'status'])]);
   let claude = { loggedIn: false, email: '' };
   try { const j = JSON.parse(c.out); claude = { loggedIn: !!j.loggedIn, email: j.email || '' }; } catch (e) {}
   const missing = g.err && g.err.code === 'ENOENT';
   const gtxt = stripAnsi(g.out + g.errOut);
-  const um = /account\s+(\S+)/i.exec(gtxt);
+  // newer gh says "account NAME", older gh says "as NAME"
+  const um = /\b(?:account|as)\s+(\S+)/i.exec(gtxt);
   const gh = { installed: !missing, loggedIn: !missing && !g.err, user: um ? um[1] : '' };
   return { claude, gh };
 }
@@ -271,7 +276,7 @@ const server = http.createServer(async (req, res) => {
   // Root cannot use bypassPermissions: when the user asked for it, allow every tool instead; otherwise allow the usual build/ship commands.
   const allow = wantBypass ? ['Bash', 'WebFetch', 'WebSearch'] : ['Bash(su:*)', 'Bash(gh:*)', 'Bash(gradle:*)', 'Bash(git:*)', 'Bash(node:*)', 'Bash(cd:*)', 'Bash(export:*)'];
   const model = typeof body.model === 'string' && /^[\w.\-\[\]]{1,80}$/.test(body.model) ? body.model : '';
-  const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(body.effort) ? body.effort : '';
+  const effort = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(body.effort) ? body.effort : '';
   const addDir = typeof body.addDir === 'string' && body.addDir.startsWith('/') ? body.addDir : '';
   const cwd = body.cwd || '/root/projects';
   // phone control (Settings: "Let Claude use the phone"): the app sends the bearer token of its local MCP server on 127.0.0.1:8765
@@ -286,7 +291,7 @@ const server = http.createServer(async (req, res) => {
     if (body.session) args.push('--resume', String(body.session));
     if (addDir) args.push('--add-dir', addDir);
     if (model) args.push('--model', model);
-    if (effort) args.push('--effort', effort);
+    if (effort && effort !== 'auto') args.push('--effort', effort);
     args.push('--permission-mode', mode);
     // -p turns cannot answer prompts, so the phone tools are allowed by server name; the approval rule (the confirm tool) lives in the server
     if (phoneTok) {
@@ -300,7 +305,7 @@ const server = http.createServer(async (req, res) => {
       }
     }
     args.push('--allowedTools', (phoneTok ? allow.concat(['mcp__claudechat-phone']) : allow).join(','));
-    const child = spawn('claude', args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(CLAUDE, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     const p = { child, key, session: body.session ? String(body.session) : '', sink: null, buf: '', err: '', last: Date.now() };
     procs.set(chat, p);
     child.stderr.on('data', (d) => { p.err += d; if (p.err.length > 8000) p.err = p.err.slice(-8000); });

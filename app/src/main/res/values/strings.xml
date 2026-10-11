@@ -28,6 +28,7 @@
     <string name="err_termux_perm">Termux access isn\'t set up yet. Open Settings → Termux link.</string>
     <string name="err_token">The bridge rejected the token. Restart the bridge from Settings.</string>
     <string name="err_exit">Claude exited with code %1$d.\n%2$s</string>
+    <string name="err_no_claude">Claude Code (the claude command) is missing in Termux. Run: npm install -g @anthropic-ai/claude-code. Then use Settings → Repair the connection.</string>
     <string name="notif_channel_keep">Keep-alive</string>
     <string name="notif_channel_done">Finished replies</string>
     <string name="notif_keep_title">Claude Chat is running</string>
@@ -101,6 +102,15 @@
     <string name="auto_start">Start bridge automatically</string>
     <string name="chat_notes">Remember earlier chats</string>
     <string name="chat_notes_sub">New chats get short notes on your last chats (not the full text)</string>
+    <string name="model_line">Show model and context under the box</string>
+    <string name="model_line_sub">The model name and how full the chat\'s context is</string>
+    <string name="effort_auto_info">Effortless picks the effort for each prompt. Turn on Auto in the effortless mod.</string>
+    <string name="effort_info_default">Claude Code\'s own default effort for this model.</string>
+    <string name="effort_info_low">Quickest answers, least thinking.</string>
+    <string name="effort_info_medium">A balance of speed and thinking.</string>
+    <string name="effort_info_high">More thinking for harder questions.</string>
+    <string name="effort_info_xhigh">Deep thinking, slower and costlier.</string>
+    <string name="effort_info_max">Most thinking the model can do, slowest and costliest.</string>
 
     <string name="sec_termux">Termux link</string>
     <string name="termux_installed">Termux is installed.</string>

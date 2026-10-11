@@ -75,12 +75,13 @@ object TermuxInstall {
 
     /** Opens Android's installer for the downloaded file (asks for "install unknown apps" first when needed). */
     fun install(c: Context, f: File) {
-        if (Build.VERSION.SDK_INT >= 26 && !c.packageManager.canRequestPackageInstalls()) {
-            c.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${c.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            return
-        }
-        // the installer runs as another user and cannot read files that only the owner group can (EACCES): copy it into our own cache first
+        // everything inside the try: a missing settings screen or a throw here must toast, not crash or vanish
         try {
+            if (Build.VERSION.SDK_INT >= 26 && !c.packageManager.canRequestPackageInstalls()) {
+                c.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${c.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return
+            }
+            // the installer runs as another user and cannot read files that only the owner group can (EACCES): copy it into our own cache first
             val dir = java.io.File(c.cacheDir, "apk").apply { mkdirs() }
             val copy = java.io.File(dir, f.name)
             f.inputStream().use { i -> copy.outputStream().use { o -> i.copyTo(o) } }

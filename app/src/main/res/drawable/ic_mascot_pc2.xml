@@ -3,7 +3,7 @@
     <!-- second frame of the laptop animation: arms a pixel lower (typing), the screen glow dimmer -->
     <path android:fillColor="#FFD97757" android:pathData="M3,6H17V13H3Z M1,9H3V12H1Z M17,9H19V12H17Z M4,13H6V16H4Z M7,13H9V16H7Z M11,13H13V16H11Z M14,13H16V16H14Z" />
     <path android:fillColor="#FF1F1B18" android:pathData="M6,8H8V9H6Z M12,8H14V9H12Z" />
-    <path android:fillColor="#4D39E58A" android:pathData="M3,6H17V10H3Z" />
+    <path android:fillColor="#4D39E58A" android:pathData="M1,6H19V10H1Z" />
     <!-- both eyes the same black, drawn over the glow -->
     <path android:fillColor="#FF1F1B18" android:pathData="M6,8H8V9H6Z M12,8H14V9H12Z" />
     <path android:fillColor="#FFB8BEC6" android:pathData="M3,9H17V16H3Z" />

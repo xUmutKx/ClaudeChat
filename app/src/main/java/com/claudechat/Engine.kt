@@ -32,7 +32,7 @@ data class Msg(
 )
 
 /** One sub-agent (Task/Agent tool call) of the running turn: what it is doing right now and whether it finished. */
-data class AgentInfo(val id: String, val title: String, val kind: String, val activity: String = "", val tools: Int = 0, val done: Boolean = false, val bg: Boolean = false)
+data class AgentInfo(val id: String, val title: String, val kind: String, val activity: String = "", val tools: Int = 0, val done: Boolean = false, val bg: Boolean = false, val tokens: Int = 0, val lastMsg: String = "", val say: String = "", val err: Boolean = false)
 
 data class Chat(val id: String, val title: String, val session: String, val cost: Double, val updated: Long)
 
@@ -131,6 +131,9 @@ object Engine {
 
     private fun newId() = java.lang.Long.toString(System.currentTimeMillis(), 36)
 
+    /** When the turn of the chat on screen started (kept on disk, so leaving and coming back does not restart the count). */
+    fun turnSince(): Long = currentId.value.let { chatRun(it).since }
+
     /** The run of a chat, created (and its messages read from disk) on first use. */
     private fun chatRun(id: String): Run = runs.getOrPut(id) {
         Run(id).also { r ->
@@ -184,6 +187,14 @@ object Engine {
     }
 
     private fun updateChat(id: String, f: (Chat) -> Chat) = chats.update { l -> l.map { if (it.id == id) f(it) else it } }
+
+    /** A name typed by the user from the chat list (long press). */
+    fun renameChat(id: String, title: String) {
+        val t = title.trim().take(80)
+        if (t.isEmpty()) return
+        updateChat(id) { it.copy(title = t) }
+        writeIndex()
+    }
 
     private fun sessionOf(id: String) = chats.value.firstOrNull { it.id == id }?.session.orEmpty()
 
@@ -586,8 +597,7 @@ object Engine {
                 delay(1000)
                 stream(r, "Your process was interrupted. Carry on from where you stopped; do not start over.", canRetry = false)
             } else {
-                // it keeps getting ended (Android killing it?): say so quietly, without the red error
-                add(r, Role.Note, tr0("Claude was interrupted several times. Send a message and it carries on.", "Claude birkaç kez yarıda kesildi. Bir mesaj yaz, devam eder."))
+                // it keeps getting ended (Android killing it?): stop quietly, no note in the chat
                 setStatus(r, Status.Idle); save(r); drain(r)
             }
         }
@@ -646,15 +656,28 @@ object Engine {
                 // a sub-agent is talking: keep its card up to date
                 val pid = o.optString("parent_tool_use_id")
                 val content = o.optJSONObject("message")?.optJSONArray("content") ?: JSONArray()
-                var act = ""; var used = 0
+                var act = ""; var used = 0; var say = ""
                 for (i in 0 until content.length()) {
                     val b = content.getJSONObject(i)
                     when (b.optString("type")) {
                         "tool_use" -> { act = toolSummary(b.optString("name"), b.optJSONObject("input")); used++ }
-                        "text" -> if (act.isEmpty()) act = b.optString("text").lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(90)
+                        "text" -> {
+                            val line = b.optString("text").lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim()
+                            if (line.isNotEmpty()) say = line.take(80) // what it last said: its speech bubble
+                            if (act.isEmpty()) act = line.take(90)
+                        }
                     }
                 }
-                if (act.isNotEmpty() || used > 0) r.agents.value = r.agents.value.map { if (it.id == pid) it.copy(activity = act.ifEmpty { it.activity }, tools = it.tools + used) else it }
+                // tokens once per message: the stream repeats a message's usage for each of its content blocks
+                val msg = o.optJSONObject("message")
+                val mid = msg?.optString("id").orEmpty()
+                val u = msg?.optJSONObject("usage")
+                val spent = if (u == null) 0 else u.optInt("input_tokens") + u.optInt("output_tokens") + u.optInt("cache_creation_input_tokens")
+                if (act.isNotEmpty() || used > 0 || spent > 0) r.agents.value = r.agents.value.map {
+                    if (it.id != pid) it
+                    else if (mid.isNotEmpty() && mid == it.lastMsg) it.copy(activity = act.ifEmpty { it.activity }, say = say.ifEmpty { it.say }, tools = it.tools + used)
+                    else it.copy(activity = act.ifEmpty { it.activity }, say = say.ifEmpty { it.say }, tools = it.tools + used, tokens = it.tokens + spent, lastMsg = mid.ifEmpty { it.lastMsg })
+                }
             }
             "user" -> if (!sub) { // tool results: a finished Task/Agent call = that agent is done
                 r.shell.value = false
@@ -702,7 +725,8 @@ object Engine {
                 if (!r.gotResult && code != 0) {
                     if (canRetry && err.contains("No conversation found", true)) return true
                     if (canRetry && badModel(r.id, err)) { add(r, Role.Note, "Model '${Prefs.chatModel(r.id)}' failed, using default."); Prefs.setChatModel(r.id, ""); return true }
-                    fail(r, appStr(R.string.err_exit, code, err))
+                    // the bridge's spawn of `claude` fails with ENOENT when Claude Code is not installed in Termux
+                    if (err.contains("ENOENT")) fail(r, appStr(R.string.err_no_claude)) else fail(r, appStr(R.string.err_exit, code, err))
                 }
             }
         }
@@ -755,7 +779,8 @@ object Engine {
     }
 
     private fun fail(r: Run, text: String, st: Status = Status.Error, action: Boolean = st == Status.Offline) {
-        r.shell.value = false
+        // a failed turn ends its agents too, else the header keeps saying "N agents working"
+        r.shell.value = false; r.agents.value = r.agents.value.map { it.copy(done = true, err = true) }
         add(r, Role.Error, text, action)
         setStatus(r, st)
         save(r)

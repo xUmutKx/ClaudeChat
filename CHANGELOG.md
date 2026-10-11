@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.71
+- Balloon and pill open Settings directly (no detour through the chat).
+- Model and context line under the input is off by default; a switch in Settings > Claude turns it on.
+- Effort: "Auto" added, and an "I" button explains the chosen effort.
+- Settings > effortless and Settings > ponytail: both listed as installed, with their own settings.
+- Top bar padding reduced; the pill strip under the handle is 16dp.
+
 ## 0.10.2x
 - Customize: TF2-style loadout (slots on both sides of the mascot), the idle animation is a slot, each slot is named, the item is shown alone.
 - Motion: "Frame by frame" really steps through 8 frames; the choice is explained under it.

@@ -46,6 +46,22 @@ class Overlay(base: Context) {
     private var idlePose = ""
 
     /** The glow follows the choice in Customize right away (none = off). */
+    private var bgAnim: ValueAnimator? = null
+    /** The pill's optional moving background: off unless the user picks one in Customize. */
+    private fun applyPillBg() {
+        val cap = capsule ?: return
+        val pick = Prefs.pillBg.value
+        if (cap.pattern == pick && (pick == "none") == (bgAnim == null)) return
+        cap.pattern = pick
+        bgAnim?.cancel(); bgAnim = null
+        if (pick != "none") bgAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 9000; repeatCount = ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
+            addUpdateListener { cap.phase = it.animatedValue as Float; cap.invalidateSelf() }
+            start()
+        }
+        cap.invalidateSelf()
+    }
+
     private fun applyGlow() {
         val cap = capsule ?: return
         val g = glowArgb(Prefs.pillGlow.value)
@@ -306,6 +322,7 @@ class Overlay(base: Context) {
         errFace = st == Status.Error || st == Status.Offline
         mascot?.setImageDrawable(mascotDrawable(idleNow, st == Status.Background || shell))
         updateIdlePose(st)
+        applyPillBg()
         applyGlow() // background shell: laptop + blue face; idle: eyes closed + "z"
         // the mascot is out walking as the buddy only while the buddy window really is on screen; if that failed, it comes back into the pill
         // hidden in the pill only while the buddy window is really there; a buddy that is still starting does not make it blink
@@ -340,7 +357,7 @@ class Overlay(base: Context) {
     }
 
     /** The hammer and the build's elapsed time, two short lines in the pill. */
-    private fun buildTag(): String { val e = Engine.buildElapsed.coerceAtLeast(0); return "%d:%02d".format(e / 60, e % 60) }
+    private fun buildTag(): String = ""   // no seconds next to the hammer; the hammer alone shows the build
 
     /** The sleeping pill's "z" floats up and fades in and out, like in the chat header. */
     private fun updateZ() {
@@ -477,6 +494,8 @@ class Overlay(base: Context) {
         var pair: IntArray? = null   // two colours at once (build while Bash runs): the outline turns through them
         var spin = 0f
         private var a = 255
+        var pattern = "none"   // optional moving gradient behind the pill (Customize), off by default
+        var phase = 0f
         private val p = Paint(Paint.ANTI_ALIAS_FLAG)
         override fun draw(c: Canvas) {
             val b = bounds
@@ -489,7 +508,9 @@ class Overlay(base: Context) {
                 rect = RectF(left, b.top.toFloat(), left + w, b.bottom.toFloat()); r = b.height() / 2f
             }
             p.style = Paint.Style.FILL; p.color = fill; p.alpha = (a * fillMul).toInt()
+            p.shader = patternShader(rect)
             c.drawRoundRect(rect, r, r, p)
+            p.shader = null
             if (glow != 0) {
                 // the glow sits behind the mascot's side of the pill and breathes with glowT
                 val cx = rect.centerX(); val cy = rect.centerY(); val rad = (if (vertical) rect.width() else rect.height()) * 1.4f
@@ -508,6 +529,18 @@ class Overlay(base: Context) {
                 c.drawRoundRect(RectF(rect.left + h, rect.top + h, rect.right - h, rect.bottom - h), r - h, r - h, p)
                 p.shader = null
             }
+        }
+        private fun patternShader(r: RectF): android.graphics.Shader? {
+            val cols = when (pattern) {
+                "aurora" -> intArrayOf(0xFF0E2A2A.toInt(), 0xFF2B1B5C.toInt(), 0xFF0E3B33.toInt())
+                "sunset" -> intArrayOf(0xFF3B1F4A.toInt(), 0xFF8A3B2B.toInt(), 0xFF4A1F35.toInt())
+                "ocean" -> intArrayOf(0xFF0B2A44.toInt(), 0xFF0F5A6B.toInt(), 0xFF0B2A44.toInt())
+                "sakura" -> intArrayOf(0xFF3A1F2B.toInt(), 0xFF5B2C3F.toInt(), 0xFF3A1F2B.toInt())
+                else -> return null
+            }
+            // mirrored tiling: the colours sway back and forth as the phase moves, with no visible seam
+            val shift = phase * r.width()
+            return android.graphics.LinearGradient(r.left - shift, 0f, r.left - shift + r.width(), 0f, cols, null, android.graphics.Shader.TileMode.MIRROR)
         }
         override fun setAlpha(alpha: Int) { a = alpha }
         override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
@@ -549,7 +582,7 @@ class Overlay(base: Context) {
         val q = ((p - 0.25f) / 0.75f).coerceIn(0f, 1f)
         val all = ((Prefs.pillAlpha.value.toIntOrNull() ?: 100).coerceIn(10, 100)) / 100f
         ring?.alpha = ringA * all
-        capsule?.let { it.frac = ringFrac + (1f - ringFrac) * q; it.fillMul = ((Prefs.pillBg.value.toIntOrNull() ?: 100).coerceIn(0, 100)) / 100f; it.alpha = (255 * ringA * all).toInt(); it.invalidateSelf() }
+        capsule?.let { it.frac = ringFrac + (1f - ringFrac) * q; it.fillMul = ((Prefs.pillFill.value.toIntOrNull() ?: 100).coerceIn(0, 100)) / 100f; it.alpha = (255 * ringA * all).toInt(); it.invalidateSelf() }
         val sideA = ((q - 0.35f) / 0.65f).coerceIn(0f, 1f)
         val sc = 0.7f + 0.3f * sideA
         mascot?.let { it.alpha = sideA * all; it.scaleX = sc; it.scaleY = sc; if (!pillVertical) it.translationX = (1f - q) * pillSide * 0.9f * mascotK }
@@ -840,7 +873,7 @@ class Overlay(base: Context) {
                     background = cap
                 }
                 fun lp(len: Int) = if (vertical) LinearLayout.LayoutParams(thick, len) else LinearLayout.LayoutParams(len, thick)
-                mascot = ImageView(ctx).apply { setImageResource(Mascots.r(R.drawable.ic_mascot)); setPadding(dp(8), dp(3), dp(4), dp(3)) }
+                mascot = ImageView(ctx).apply { setImageResource(Mascots.r(R.drawable.ic_mascot)); setPadding(dp(6), dp(3), dp(6), dp(3)) }
                 ring = RingView(ctx) // thin ring around the camera hole (spinner while working)
                 if (mode == 1) box.addView(ring, lp(ringLen))
                 box.addView(mascot, lp(side))
@@ -862,7 +895,7 @@ class Overlay(base: Context) {
                     // the hammer turns around the bottom end of its handle, which stays fixed; set once the size is known
                     addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> v.pivotX = v.width * 0.23f; v.pivotY = v.height * 0.9f }
                 }
-                icon.addView(hammerView, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+                icon.addView(hammerView, FrameLayout.LayoutParams(dp(13), dp(13), Gravity.CENTER))
                 box.addView(icon, lp(side))
                 if (mode == 2) box.addView(ring, lp(ringLen))
                 iconBox = icon; pillVertical = vertical; pillSide = side
@@ -960,7 +993,7 @@ class Overlay(base: Context) {
      */
     private fun addHandle(edge: Edge, wx: Int, wy: Int, thick: Int, total: Int, vertical: Boolean) {
         val w = screenWidth(); val h = screenHeight()
-        val pad = dp(12); val band = dp(24)
+        val pad = dp(12); val band = dp(16)
         val pill = android.graphics.Rect(wx, wy, wx + (if (vertical) thick else total), wy + (if (vertical) total else thick))
         val strip = when (edge) {
             Edge.TOP -> android.graphics.Rect(pill.left - pad, pill.bottom, pill.right + pad, pill.bottom + band)

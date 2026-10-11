@@ -21,7 +21,7 @@ if [ ! -d "$ROOTFS" ]; then
 fi
 
 say "Claude Code, GitHub CLI and tools inside $DISTRO"
-proot-distro login "$DISTRO" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; if ! command -v claude >/dev/null || ! command -v gh >/dev/null || ! command -v script >/dev/null; then apt-get update && apt-get install -y curl nodejs npm git gh util-linux ca-certificates && (command -v claude >/dev/null || npm install -g @anthropic-ai/claude-code); fi'
+proot-distro login "$DISTRO" -- bash -lc 'export DEBIAN_FRONTEND=noninteractive; if ! command -v claude >/dev/null || ! command -v gh >/dev/null || ! command -v script >/dev/null; then apt-get update && apt-get install -y curl nodejs npm git gh util-linux ca-certificates && (command -v claude >/dev/null || npm install -g @anthropic-ai/claude-code); fi; command -v claude >/dev/null || exit 1' || { say "Claude Code (claude) is missing. Run this in Termux, then run this setup again: proot-distro login $DISTRO -- npm install -g @anthropic-ai/claude-code"; say "Claude Code (claude) yok. Termux'ta şunu çalıştır, sonra bu kurulumu yeniden çalıştır: proot-distro login $DISTRO -- npm install -g @anthropic-ai/claude-code"; exit 1; }
 
 say "Starting the Claude Chat connection"
 mkdir -p "$ROOTFS/root/claudechat"
@@ -30,4 +30,4 @@ termux-wake-lock 2>/dev/null || true
 pkill -f 'claudechat/bridge.js' 2>/dev/null || true
 nohup proot-distro login "$DISTRO" -- bash -lc 'CC_TOKEN=@TOKEN@ CC_PORT=@PORT@ exec node /root/claudechat/bridge.js' >/dev/null 2>&1 &
 sleep 4
-say "Done. Go back to Claude Chat: it connects by itself."
+say "Done. Go back to Claude Chat: it connects by itself. / Bitti. Claude Chat'e dön: kendisi bağlanır."

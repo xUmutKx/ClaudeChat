@@ -155,6 +155,7 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit 
                 Icon(Icons.Filled.KeyboardArrowDown, tr("Newest message", "En yeni mesaj"), tint = Color.White)
             }
         }
+        AgentGrid()
         AgentsBar()
         if (slash.isNotEmpty()) Palette(slash) { input = "/${it.name} " }
         replyTo?.let { r ->
@@ -173,15 +174,18 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit 
         }
         BuildBar(onTasks)
         val ctxUsed by Engine.context.collectAsState()
+        val showModel by Prefs.modelLine.flow.collectAsState()
         Composer(input, { input = it }, working, atts.isNotEmpty(), { galleryPicker.launch("image/*") }, { picker.launch("*/*") },
             onSend = {
                 if (!Cmds.runLocal(input.trim(), { sheet = true }, onSettings)) Engine.send(input, atts.toList(), replyTo?.let { it.role to it.text })
                 input = ""; atts.clear(); replyTo = null
             }, onStop = { Engine.stop() })
-        // under the box: the model and how much of its context window this chat uses
-        val window = if ((model + modelSeen).contains("1m", true)) 1_000_000 else 200_000
-        Text("◆ ${model.ifEmpty { shortModel(modelSeen) }.ifEmpty { "Auto" }} · ${(ctxUsed * 100 / window).coerceAtMost(100)}% context",
-            Modifier.padding(start = 22.dp, bottom = 6.dp), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // under the box: the model and how much of its context window this chat uses (Settings > Claude, off by default)
+        if (showModel) {
+            val window = if ((model + modelSeen).contains("1m", true)) 1_000_000 else 200_000
+            Text("◆ ${model.ifEmpty { shortModel(modelSeen) }.ifEmpty { "Auto" }} · ${(ctxUsed * 100 / window).coerceAtMost(100)}% context",
+                Modifier.padding(start = 22.dp, bottom = 6.dp), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -192,6 +196,9 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
     val doneKey by Prefs.doneColor.flow.collectAsState()
     val bashKey by Prefs.bashColor.flow.collectAsState()
     val thinkKey by Prefs.thinkColor.flow.collectAsState()
+    val agentsNow by Engine.agents.collectAsState()
+    val live = agentsNow.count { !it.done }
+    val callOn by Prefs.agentCall.flow.collectAsState() // the video call shows the agents itself: no mascots up here
     val hue by rememberInfiniteTransition(label = "rbow").animateFloat(0f, 360f, infiniteRepeatable(tween(4000, easing = LinearEasing)), label = "rb")
     val toBlue by rememberInfiniteTransition(label = "both").animateFloat(0f, 1f, infiniteRepeatable(tween(1200, easing = LinearEasing), androidx.compose.animation.core.RepeatMode.Reverse), label = "bb")
     // the same colours as the pill: build colour while a build runs, done colour when done, blue for the shell
@@ -203,11 +210,13 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
         building -> Color(StateColors.argb(buildKey, hue))
         shell -> Color(StateColors.argb(bashKey, hue))
         st == Status.Working && det == appStr(R.string.thinking) -> Color(StateColors.argb(thinkKey, hue))
+        // the main chat looks finished but its agents still work: blue, not "Done"
+        st == Status.Done && live > 0 -> Color(StateColors.argb(bashKey, hue))
         st == Status.Done -> Color(StateColors.argb(doneKey, hue))
         else -> statusColor(st)
     }
     Surface(color = MaterialTheme.colorScheme.background) {
-        Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             if (Prefs.showHeaderMascot.flow.collectAsState().value == "1") {
                 // the same coloured loading ring as around the camera (the pill is hidden while the chat is open)
                 val ringColor = accent
@@ -240,14 +249,20 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
                     Spacer(Modifier.width(6.dp))
                     // thinking: the same empty thought bubble as in the pill
                     if (st == Status.Working && !shell && det == appStr(R.string.thinking)) Icon(painterResource(R.drawable.ic_thought), null, Modifier.size(12.dp), tint = Color(StateColors.argb(thinkKey)))
-                    Text((if (title.isNotEmpty()) modelTitle(model) + " · " else "") + (if (building) tr("Compiling", "Derleniyor") else statusText(st, det)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text((if (title.isNotEmpty()) modelTitle(model) + " · " else "") + (if (building) tr("Compiling", "Derleniyor") else if (st != Status.Working && live > 0) tr("$live agents working", "$live ajan çalışıyor") else statusText(st, det)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             // one small mascot per running agent (at most six), overlapping, the front one on top
-            val agentsNow by Engine.agents.collectAsState()
-            val running = agentsNow.count { !it.done }.coerceAtMost(6)
+            val running = if (callOn) 0 else live.coerceAtMost(6)
             if (running > 0) Box(Modifier.size(18.dp + 8.dp * (running - 1), 14.dp)) {
-                repeat(running) { i -> Mascot(true, Modifier.size(18.dp, 14.dp).offset(x = 8.dp * i).zIndex(i.toFloat()), computer = i % 2 == 1) }
+                repeat(running) { i ->
+                    // a different hat per mascot, the same one every time the header is drawn
+                    val hat = Outfit.hat(Outfit.ALL[(1 + i * 5) % Outfit.ALL.size])
+                    Box(Modifier.size(18.dp, 14.dp).offset(x = 8.dp * i).zIndex(i.toFloat())) {
+                        Mascot(true, Modifier.fillMaxSize(), computer = i % 2 == 1)
+                        if (hat != 0) androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(hat), null, Modifier.size(9.dp).align(Alignment.TopCenter))
+                    }
+                }
             }
             IconButton({ Prefs.black.value = !Prefs.black.value }) { Icon(Icons.Outlined.DarkMode, stringResource(R.string.black_mode)) }
             IconButton(onChats) { Icon(Icons.Outlined.FormatListBulleted, stringResource(R.string.chats_title)) }
@@ -578,16 +593,14 @@ private fun AttChip(a: Att, onRemove: () -> Unit) {
 @Composable
 private fun TypingBubble() {
     // like Claude Code's status line: a turning star and a random orange word that changes now and then, with the seconds so far
-    var word by remember { mutableStateOf(WORKING_WORDS.random()) }
+    val since = remember { Engine.turnSince() }
+    val word = remember(since) { WORKING_WORDS.random() } // one word for the whole turn
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         var n = 0
-        while (true) {
-            kotlinx.coroutines.delay(250); n++; tick = n
-            if (n % 12 == 0) word = WORKING_WORDS.filter { it != word }.random()
-        }
+        while (true) { kotlinx.coroutines.delay(250); n++; tick = n }
     }
-    val orange = Color(0xFFD97757)
+    val orange = MaterialTheme.colorScheme.primary
     Row(Modifier.padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         // drawn, not a text glyph: phones turn "✳" and friends into colour emoji
         androidx.compose.foundation.Canvas(Modifier.size(14.dp)) {
@@ -602,7 +615,7 @@ private fun TypingBubble() {
         }
         Spacer(Modifier.width(6.dp))
         Text("$word…", color = orange, fontSize = 12.sp)
-        Text("  ${tick / 4}s", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+        Text("  ${if (tick >= 0 && since > 0) ((System.currentTimeMillis() - since) / 1000).coerceAtLeast(0) else tick / 4}s", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
     }
 }
 
@@ -640,7 +653,7 @@ private fun Composer(value: String, onChange: (String) -> Unit, working: Boolean
                 val studio by Prefs.studio.flow.collectAsState()
                 IconButton({ Prefs.studio.value = !studio }, Modifier.size(40.dp)) { Icon(Icons.Filled.Brush, "Studio", tint = if (studio) cs.primary else cs.onSurfaceVariant) }
                 val pv by Prefs.provider.flow.collectAsState()
-                if (pv != "claude") Text(Providers.byId(pv).name, fontSize = 12.sp, color = cs.onSurfaceVariant)
+                Text(Providers.byId(pv).name, fontSize = 12.sp, color = cs.onSurfaceVariant)
                 Spacer(Modifier.weight(1f))
                 if (working) {
                     FilledIconButton(onClick = onStop, modifier = Modifier.size(40.dp),
@@ -818,7 +831,8 @@ private fun OptionsSheet(onDismiss: () -> Unit) {
     val models = listOf("" to stringResource(R.string.default_label),
         "fable" to "Fable 5.1", "opus" to "Opus 5.5", "sonnet" to "Sonnet 5.5", "claude-haiku-5-5" to "Haiku 5.5", "haiku" to "Haiku",
         "sonnet[1m]" to "Sonnet 1M", "opusplan" to "Opus plan")
-    val efforts = listOf("" to stringResource(R.string.default_label), "low" to "Low", "medium" to "Medium", "high" to "High", "xhigh" to "X-High", "max" to "Max")
+    val efforts = listOf("" to stringResource(R.string.default_label), "auto" to tr("Auto", "Oto"), "low" to "Low", "medium" to "Medium", "high" to "High", "xhigh" to "X-High", "max" to "Max")
+    var effortInfo by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.options_title), style = MaterialTheme.typography.titleLarge)
@@ -836,6 +850,16 @@ private fun OptionsSheet(onDismiss: () -> Unit) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 efforts.forEach { (v, l) -> FilterChip(effort == v, { Prefs.effort.value = v }, { Text(l) }) }
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.weight(1f))
+                Text("I", Modifier.border(1.dp, MaterialTheme.colorScheme.primary, CircleShape).clickable { effortInfo = !effortInfo }.padding(horizontal = 9.dp, vertical = 2.dp),
+                    color = MaterialTheme.colorScheme.primary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            if (effortInfo) Text(stringResource(when (effort) {
+                "auto" -> R.string.effort_auto_info; "low" -> R.string.effort_info_low; "medium" -> R.string.effort_info_medium
+                "high" -> R.string.effort_info_high; "xhigh" -> R.string.effort_info_xhigh; "max" -> R.string.effort_info_max
+                else -> R.string.effort_info_default
+            }), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(stringResource(R.string.perm_mode), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Choices(listOf("default" to R.string.mode_default, "acceptEdits" to R.string.mode_edits, "plan" to R.string.mode_plan, "bypassPermissions" to R.string.mode_bypass), mode) { Prefs.mode.value = it }
         }

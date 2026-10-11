@@ -1,0 +1,20 @@
+stable size=191106991
+============================================================
+Bun v1.4.3 (eecfd55de) Linux arm64
+Linux Kernel v6.17.0 | glibc v2.43
+CPU: neon fp aes crc32 atomics
+Args: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe" "--version"
+
+Elapsed: 15ms | User: 0ms | Sys: 12ms
+RSS: 4.92 MB | Peak: 4.92 MB | Commit: 18.22 MB | Faults: 82
+
+panic(main thread): Bus error at address 0xF69A465
+oh no: Bun has crashed. This indicates a bug in Bun, not your code.
+
+To send a redacted crash report to Bun's team,
+please file a GitHub issue using the link below:
+
+ https://bun.report/1.4.3/L_1eecfd55AA2+0muDul4i9Bm/r/8B+29j/B2x3I__A4AqmymtP
+
+Bus error
+version exit=135
