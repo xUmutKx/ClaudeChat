@@ -141,6 +141,7 @@ fun ChatScreen(onSettings: () -> Unit, onChats: () -> Unit, onSetup: () -> Unit 
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
+                item(key = "build-apk") { FinishedBuildChip() }
                 if (showTyping) item(key = "typing") { TypingBubble() }
                 itemsIndexed(items.asReversed(), key = { _, g -> g.first().id }) { ri, g ->
                     val m = g.first()

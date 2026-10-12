@@ -195,11 +195,7 @@ fun BuildBar(onOpen: () -> Unit) {
     var st by remember { mutableStateOf<BuildState?>(null) }
     LaunchedEffect(Unit) { while (true) { st = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Engine.buildLog()?.let { buildState(it) } }; delay(3000) } }
     val b = st ?: return
-    if (!b.running) {
-        // a finished build: its APK is offered right here as a file to install
-        if (b.ok) ApkChip(b.project)
-        return
-    }
+    if (!b.running) return // a finished build's APK is shown in the chat list (FinishedBuildChip)
     val el = liveElapsed(b)
     Column(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 18.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -208,6 +204,15 @@ fun BuildBar(onOpen: () -> Unit) {
         }
         LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 3.dp).height(3.dp).clip(RoundedCornerShape(2.dp)), color = cs.primary)
     }
+}
+
+/** The APK of the newest finished build, as a chip at the end of the chat list, right under the last message. */
+@Composable
+fun FinishedBuildChip() {
+    var st by remember { mutableStateOf<BuildState?>(null) }
+    LaunchedEffect(Unit) { while (true) { st = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Engine.buildLog()?.let { buildState(it) } }; delay(3000) } }
+    val b = st ?: return
+    if (!b.running && b.ok) ApkChip(b.project)
 }
 
 /** The APK of a finished build, as a tappable file card (tap = install). */
