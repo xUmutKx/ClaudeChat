@@ -116,8 +116,7 @@ private fun tokenText(n: Int): String = when {
 private fun AgentCall(agents: List<AgentInfo>) {
     val cs = MaterialTheme.colorScheme
     var detailId by rememberSaveable { mutableStateOf("") }
-    var picked by rememberSaveable { mutableStateOf("") } // tapped tile: shows the Join button; same tile or background hides it
-    fun pick(id: String) { picked = if (picked == id) "" else id }
+    var folded by rememberSaveable { mutableStateOf(false) }
     val speaker = agents.lastOrNull { !it.done }?.id
     val talk = remember { mutableStateMapOf<String, String>() } // agent id -> handoff line, shown for a few seconds
     val scope = rememberCoroutineScope()
@@ -131,38 +130,19 @@ private fun AgentCall(agents: List<AgentInfo>) {
         }
         known = agents.size
     }
-    // six at most: the speaker in front, one behind it, the rest in two middle rows at fixed spots
-    val shown = agents.take(6)
-    val fi = shown.indexOfFirst { it.id == speaker }.let { if (it < 0) shown.lastIndex else it }
-    val others = shown.indices.filter { it != fi }
-    val back = others.firstOrNull()
-    val mids = others.drop(1)
-    var folded by rememberSaveable { mutableStateOf(false) }
-    val w = LocalConfiguration.current.screenWidthDp.dp - 40.dp
-    val spot = (w - 128.dp) / 2f
     Surface(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), shape = RoundedCornerShape(16.dp), color = cs.surfaceContainer) {
         Column {
             Row(Modifier.fillMaxWidth().clickable { folded = !folded }.padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(tr("Agents", "Ajanlar"), Modifier.weight(1f), fontSize = 12.sp, color = cs.onSurfaceVariant)
                 Icon(if (folded) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess, null, Modifier.size(18.dp), tint = cs.onSurfaceVariant)
             }
-            if (!folded) Box(Modifier.width(w).height(200.dp).padding(start = 8.dp).clickable { picked = "" }) {
-                back?.let { i -> CallTile(shown[i], spot - 40.dp, 0.dp, 1f, lift = false, talk = talk[shown[i].id]) { pick(shown[i].id) } }
-                mids.forEachIndexed { k, i ->
-                    val jitter = Math.floorMod(shown[i].id.hashCode(), 24).dp
-                    CallTile(shown[i], 16.dp + (w - 160.dp) / 2f * (k / 2f) + jitter, if (k % 2 == 0) 36.dp else 100.dp, 2f + k % 2, lift = false, talk = talk[shown[i].id]) { pick(shown[i].id) }
-                }
-                // the speaker sits in its room, big in front; the room is picked by its place in the list
-                val sp = shown[fi]
-                Column(Modifier.align(Alignment.TopCenter).width(200.dp).zIndex(100f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    CallBubble(sp, talk[sp.id])
-                    CloseUpCall(sp, speaking = sp.say.isNotEmpty(), roomIndex = agents.indexOf(sp) % 20 + 1,
-                        modifier = Modifier.width(200.dp).clickable { pick(sp.id) })
-                    Text(sp.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onSurfaceVariant)
-                }
-                shown.firstOrNull { it.id == picked }?.let { p ->
-                    Button(onClick = { detailId = p.id }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp).zIndex(200f),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)) { Text(tr("Join video call", "Katıl"), fontSize = 12.sp) }
+            if (!folded) Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // a plain grid: three tiles a row, every tile the same size, no overlap
+                agents.take(12).chunked(3).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { a -> AgentTile(a, lift = a.id == speaker, talk = talk[a.id], Modifier.weight(1f)) { detailId = a.id } }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
                 }
             }
         }
@@ -180,56 +160,32 @@ private fun AgentCall(agents: List<AgentInfo>) {
     }
 }
 
-/** The latest words of an agent, or a line passed on to the next one. */
-@Composable
-private fun CallBubble(a: AgentInfo, talk: String?) {
-    Box(Modifier.width(128.dp).height(40.dp), contentAlignment = Alignment.BottomCenter) {
-        Crossfade((talk ?: a.say.ifEmpty { a.activity }) to (talk != null)) { (t, handoff) ->
-            if (t.isNotEmpty()) SpeechBubble(t, handoff)
-        }
-    }
-}
-
-/** Little props for the video-call tiles, one per agent in turn. */
+/** Little props for the agent tiles, one per agent in turn. */
 private val AGENT_DECOR = listOf("☕", "🌵", "🎧", "📚", "🪴", "🧸", "🎮", "🔭", "🧩", "🕯️")
 
-/** One agent as a window: a bubble above it, a title bar with a status dot, our mascot below. Each agent gets its own tilt and bob rhythm (from its id). */
+/** One agent in the grid: title with a status dot, our mascot at its computer while it works, one line of what it says, its tokens. */
 @Composable
-private fun BoxScope.CallTile(a: AgentInfo, x: Dp, y: Dp, z: Float, lift: Boolean, talk: String?, onClick: () -> Unit) {
+private fun AgentTile(a: AgentInfo, lift: Boolean, talk: String?, modifier: Modifier, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val seed = Math.floorMod(a.id.hashCode(), 1000)
-    val tilt = 0f // straight, like a video-call grid
-    val fade by animateFloatAsState(if (a.done) 0.45f else 1f, label = "fade")
-    val hop = remember { Animatable(0f) }
-    LaunchedEffect(a.say, lift) { // the speaking window hops when it says something new
-        if (lift && !a.done) { hop.animateTo(-10f, tween(120)); hop.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy)) }
-    }
-    val density = LocalDensity.current.density
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(12.dp)
+    val fade by animateFloatAsState(if (a.done) 0.55f else 1f, label = "agentFade")
     Column(
-        Modifier.align(Alignment.TopStart).offset(x = x, y = y).zIndex(z)
-            .width(128.dp).graphicsLayer { alpha = fade; translationY = hop.value * density }
+        modifier.graphicsLayer { alpha = fade }.clip(shape)
+            .background(if (lift) cs.primaryContainer else cs.surfaceContainerHigh)
             .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        CallBubble(a, talk)
-        Column(
-            Modifier.width(128.dp).graphicsLayer { rotationZ = tilt }
-                .shadow(8.dp, shape).clip(shape).background(if (lift) cs.primaryContainer else cs.surfaceContainerHigh)
-        ) {
-            // title bar, like a desktop window
-            Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHighest).padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (a.done) Icon(Icons.Filled.Check, null, Modifier.size(10.dp), tint = Color(0xFF4CAF50)) else PulseDot(Color(0xFF2196F3))
-                Spacer(Modifier.width(5.dp))
-                Text(a.title, Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
-                Mascot(!a.done, Modifier.size(40.dp, 30.dp), sleeping = a.done)
-                // each agent keeps its own little prop (by its place in the list), so no two look the same
-                Text(AGENT_DECOR[Engine.agents.value.indexOf(a).coerceAtLeast(0) % AGENT_DECOR.size], Modifier.align(Alignment.TopEnd), fontSize = 14.sp)
-            }
-            if (a.tokens > 0) Text(tokenText(a.tokens), Modifier.padding(start = 6.dp, bottom = 3.dp), fontSize = 9.sp, color = cs.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHighest).padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (a.done) Icon(Icons.Filled.Check, null, Modifier.size(10.dp), tint = Color(0xFF4CAF50)) else PulseDot(Color(0xFF2196F3))
+            Spacer(Modifier.width(5.dp))
+            Text(a.title, Modifier.weight(1f), fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
+            // a running agent sits at its computer; a finished one sleeps
+            Mascot(!a.done, Modifier.size(44.dp, 34.dp), computer = !a.done, sleeping = a.done)
+            Text(AGENT_DECOR[Engine.agents.value.indexOf(a).coerceAtLeast(0) % AGENT_DECOR.size], Modifier.align(Alignment.TopEnd).padding(2.dp), fontSize = 13.sp)
+        }
+        Text(talk ?: a.say.ifEmpty { a.activity }, Modifier.padding(horizontal = 6.dp), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onSurfaceVariant)
+        if (a.tokens > 0) Text(tokenText(a.tokens), Modifier.padding(start = 6.dp, bottom = 4.dp), fontSize = 9.sp, color = cs.onSurfaceVariant)
     }
 }
 
@@ -261,19 +217,6 @@ fun AgentGrid() {
         AlertDialog(onDismissRequest = { detailId = "" }, confirmButton = { TextButton({ detailId = "" }) { Text(tr("Close", "Kapat")) } },
             title = { Text(a.title) },
             text = { Text(listOf(a.kind, a.activity, a.say).filter { it.isNotBlank() }.joinToString("\n")) })
-    }
-}
-
-@Composable
-private fun SpeechBubble(text: String, handoff: Boolean) {
-    val cs = MaterialTheme.colorScheme
-    val bg = if (handoff) cs.tertiaryContainer else cs.surface
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Surface(shape = RoundedCornerShape(10.dp), color = bg, shadowElevation = 3.dp) {
-            Text(text, Modifier.width(120.dp).padding(horizontal = 7.dp, vertical = 4.dp), fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                color = if (handoff) cs.onTertiaryContainer else cs.onSurface)
-        }
-        Box(Modifier.offset(y = (-4).dp).size(8.dp).rotate(45f).background(bg))
     }
 }
 
@@ -582,7 +525,9 @@ private fun PreviewTiles(items: List<Pair<String, String>>, current: String, onP
             val src = remember { MutableInteractionSource() }
             val pressed by src.collectIsPressedAsState()
             val grow by animateFloatAsState(if (pressed) 1.12f else 1f, label = "tilePress")
-            Box(Modifier.size(tileW.dp, tileH.dp).graphicsLayer { scaleX = grow; scaleY = grow }.clip(RoundedCornerShape(14.dp))
+            // the picked tile springs up a little, so the choice is seen at once
+            val pop by animateFloatAsState(if (on) 1.08f else 1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "tilePick")
+            Box(Modifier.size(tileW.dp, tileH.dp).graphicsLayer { scaleX = grow * pop; scaleY = grow * pop }.clip(RoundedCornerShape(14.dp))
                 .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp)) else Modifier)
                 .clickable(interactionSource = src, indication = null) { onPick(k) }
                 .semantics { contentDescription = name }, contentAlignment = Alignment.Center) { tile(k) }

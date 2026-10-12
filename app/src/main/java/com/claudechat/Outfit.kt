@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 /** The mascot's looks (Settings / tap the header mascot): hat or accessory, body colour. Shared by the pill, bubble, notification, status-bar icon and chat header. */
 object Outfit {
     val ALL = listOf("none", "wizard", "crown", "party", "bow", "cap", "phones", "halo", "ears", "santa",
-        "tophat", "pirate", "chef", "cowboy", "beanie", "viking", "devil", "antlers", "bunny", "ninja", "sprout", "flower", "unicorn", "propeller", "knight", "graduate", "detective", "witch", "hardhat", "mushroom", "astronaut", "pumpkin", "fez", "tiara",
+        "tophat", "pirate", "chef", "cowboy", "beanie", "viking", "devil", "antlers", "bunny", "ninja", "sprout", "flower", "unicorn", "propeller", "knight", "graduate", "detective", "witch", "hardhat", "mushroom", "astronaut", "pumpkin", "fez", "tiara", "turban", "sailor",
         "beret", "fedora", "bandana", "sombrero", "mohawk", "pilot", "bucket", "headband")
 
     fun hat(name: String = Prefs.pillOutfit.value): Int = when (name) {
@@ -42,6 +42,8 @@ object Outfit {
         "fez" -> R.drawable.ic_cos_fez
         "tiara" -> R.drawable.ic_cos_tiara
         "mushroom" -> R.drawable.ic_hat_mushroom
+        "turban" -> R.drawable.ic_hat_turban
+        "sailor" -> R.drawable.ic_hat_sailor
         "beret" -> R.drawable.ic_hat_beret
         "fedora" -> R.drawable.ic_hat_fedora
         "bandana" -> R.drawable.ic_hat_bandana
@@ -84,6 +86,8 @@ object Outfit {
         "witch" -> R.drawable.ic_stat_mascot_witch
         "hardhat" -> R.drawable.ic_stat_mascot_hardhat
         "mushroom" -> R.drawable.ic_stat_mascot_mushroom
+        "turban" -> R.drawable.ic_stat_mascot_turban
+        "sailor" -> R.drawable.ic_stat_mascot_sailor
         "beret" -> R.drawable.ic_stat_mascot_beret
         "fedora" -> R.drawable.ic_stat_mascot_fedora
         "bandana" -> R.drawable.ic_stat_mascot_bandana

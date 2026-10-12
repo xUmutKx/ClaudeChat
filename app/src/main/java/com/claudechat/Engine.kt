@@ -471,7 +471,8 @@ object Engine {
 
     private suspend fun execute(r: Run, prompt: String) {
         r.curId = null; r.streamed = false; r.anyText = false; r.gotResult = false; r.interrupted = false; r.resumes = 0
-        r.agents.value = emptyList(); r.shell.value = false
+        // a new message clears only the finished agents: the ones still running keep their tile
+        r.agents.value = r.agents.value.filter { !it.done }; r.shell.value = false
         try {
             val pv = Providers.current()
             if (pv.id != "claude") { direct(r, pv); return }
