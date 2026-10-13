@@ -498,6 +498,7 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
     private var happy: Drawable? = null; private var wow: Drawable? = null; private var blanket: Drawable? = null; private var hat: Drawable? = null
     private var wear: List<Drawable> = emptyList()   // glasses, shoes, clothes: the same chosen pieces as the header and pill
     private var pc1: Drawable? = null; private var pc2: Drawable? = null
+    private var sleepFace: Drawable? = null        // asleep: navy body with closed eyes (the blink keeps the orange `closed`)
     private val blanketOn get() = Prefs.buddyBlanket.value == "1"
     private val idleOn get() = Prefs.buddyIdle.value == "1"
 
@@ -508,11 +509,12 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
         happy = face(Mascots.r(R.drawable.ic_mascot_happy18)); wow = face(Mascots.r(R.drawable.ic_mascot_wow18))
         fun pcFace(alt: Boolean): Drawable = Mascots.pc(alt).map { face(it) }.let { l -> if (l.size == 1) l[0] else android.graphics.drawable.LayerDrawable(l.toTypedArray()) }
         pc1 = pcFace(false); pc2 = pcFace(true)
+        sleepFace = face(Mascots.r(R.drawable.ic_mascot_sleep_navy18))
         blanket = ContextCompat.getDrawable(c, R.drawable.ic_blanket)!!.mutate()
         val hid = Outfit.hat(); hat = if (hid != 0) Mascots.hat(c, hid) else null
         wear = Wear.worn(false).map { ContextCompat.getDrawable(c, it)!!.mutate() }
         val dw = s; val dh = (s * 0.9f).toInt()
-        for (d in listOf(open, closed, x, happy, wow, blanket, hat, pc1, pc2) + wear) d?.setBounds(-dw / 2, -dh / 2, dw / 2, dh / 2)
+        for (d in listOf(open, closed, x, happy, wow, blanket, hat, pc1, pc2, sleepFace) + wear) d?.setBounds(-dw / 2, -dh / 2, dw / 2, dh / 2)
     }
 
     private val tick = object : Runnable {
@@ -585,7 +587,7 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
                 val k = exp(-t * 1.4).toFloat(); rot = sin(t * 32.0).toFloat() * 7f * k; dx = sin(t * 32.0).toFloat() * 0.03f * s * k
             }
             Mood.SLEEP -> {
-                face = closed
+                face = sleepFace
                 // breathing would stretch the blanket too: with the blanket on, the sleeper stays still
                 val br = 0f; /* no breathing: the sleeper stays still */ sy = 1f + 0.025f * br; sx = 1f - 0.012f * br; dy = 0.01f * s * br
             }
@@ -601,9 +603,9 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
         // at the laptop the laptop goes in front of the clothes, so the bow tie sits behind it
         val gearOnTop = mood != Mood.PC
         if (!gearOnTop) wear.forEach { it.draw(cv) }
-        // the glow picked in Customize, behind the buddy (a soft disc, no hard edge)
+        // the glow picked in Customize, behind the buddy (a soft disc, no hard edge); not at the laptop, where the light only falls on the mascot
         val gl = glowArgb(Prefs.buddyGlow.value)
-        if (gl != 0) {
+        if (gl != 0 && mood != Mood.PC) {
             glowPaint.shader = android.graphics.RadialGradient(0f, 0f, s * 0.6f, (gl and 0x00FFFFFF) or 0x66000000, 0, android.graphics.Shader.TileMode.CLAMP)
             cv.drawCircle(0f, 0f, s * 0.6f, glowPaint)
         }

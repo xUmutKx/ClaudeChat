@@ -353,8 +353,8 @@ object Engine {
         http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/build")).header("X-Token", Termux.cleanToken()).build()).execute().use { resp ->
             if (!resp.isSuccessful) null else JSONObject(resp.body!!.string()).let { o ->
                 buildAlive = o.optBoolean("alive"); buildRunning.value = buildAlive; buildElapsed = o.optInt("elapsed", -1)
-                // only a full APK build counts here: a Kotlin-only check (_compile.log) says "finished" without any file
-                if (o.optString("file").isEmpty() || !o.optString("file").endsWith("_build.log")) null else {
+                // only a full APK build counts here (<project>_build.log or the release builds' <project>_release.log): a Kotlin-only check (_compile.log) says "finished" without any file
+                if (o.optString("file").isEmpty() || !o.optString("file").let { it.endsWith("_build.log") || it.endsWith("_release.log") }) null else {
                     val f = o.getString("file"); val text = o.optString("text")
                     // a new run of the same log file starts again from a short log: forget the old first-seen time
                     synchronized(buildSeen) { if (buildSeen[f] == null || (text.length < 600 && !text.contains("BUILD "))) buildSeen[f] = System.currentTimeMillis() - o.optInt("age") * 1000L }

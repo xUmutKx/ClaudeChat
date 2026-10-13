@@ -108,9 +108,9 @@ object Mascots {
         if (c == "claude") return base
         val suffix = when (base) {
             R.drawable.ic_mascot -> ""
-            R.drawable.ic_mascot_sleep -> "_s"
+            R.drawable.ic_mascot_sleep, R.drawable.ic_mascot_sleep_navy -> "_s"
             R.drawable.ic_mascot18, R.drawable.ic_mascot_happy18, R.drawable.ic_mascot_wow18 -> "_18"
-            R.drawable.ic_mascot_sleep18 -> "_s18"
+            R.drawable.ic_mascot_sleep18, R.drawable.ic_mascot_sleep_navy18 -> "_s18"
             else -> return base
         }
         return id("ic_ch_$c$suffix").takeIf { it != 0 } ?: base

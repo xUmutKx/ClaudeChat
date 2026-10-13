@@ -11,8 +11,8 @@ android {
         applicationId = "com.umutk.claudechat"
         minSdk = 29
         targetSdk = 34
-        versionCode = 134
-        versionName = "0.10.85"
+        versionCode = 136
+        versionName = "0.10.87"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {

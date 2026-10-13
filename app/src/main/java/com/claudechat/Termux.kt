@@ -54,11 +54,12 @@ object Termux {
         val b64 = Base64.encodeToString(c.assets.open("bridge.js").readBytes(), Base64.NO_WRAP)
         val port = Prefs.port.value.filter(Char::isDigit).ifEmpty { "8787" }
         val token = cleanToken()
-        return "mkdir -p /root/claudechat; : > /root/claudechat/bridge.log; echo $b64 | base64 -d > /root/claudechat/bridge.js; " +
+        // D keeps the full path out of this shell's own text: pkill -f would otherwise match this launcher and kill itself
+        return "D=/root/claudechat; mkdir -p \$D; : > \$D/bridge.log; echo $b64 | base64 -d > \$D/bridge.js; " +
             (if (kill) "pkill -f '[c]laudechat/bridge.js'; sleep 0.3;" else "") +
             // keep the bridge up: if node exits or crashes, the same loop starts it again after 2 s (the log keeps the reason)
-            "while :; do CC_TOKEN=$token CC_PORT=$port node /root/claudechat/bridge.js" + (if (toFile) " >>/root/claudechat/bridge.log 2>&1" else "") +
-            "; echo \"[\$(date +%T)] bridge stopped, restarting in 2 s\" >>/root/claudechat/bridge.log; sleep 2; done"
+            "while :; do CC_TOKEN=$token CC_PORT=$port node \$D/bridge.js" + (if (toFile) " >>\$D/bridge.log 2>&1" else "") +
+            "; echo \"[\$(date +%T)] bridge stopped, restarting in 2 s\" >>\$D/bridge.log; sleep 2; done"
     }
 
     /** One line to paste into Termux by hand: needs no permission, root or allow-external-apps. */
@@ -135,6 +136,9 @@ object Termux {
         val pr = ProcessBuilder("su", "-c", "tail -c 700 $f 2>&1; ls $USR/bin/proot-distro 2>&1").redirectErrorStream(true).start()
         pr.inputStream.bufferedReader().readText().trim()
     } catch (e: Exception) { "" }
+
+    /** Kills a bridge (and its restart loop) that is alive but not answering, through root. The pattern is bracketed so pkill never matches its own su shell. */
+    fun killBridge() { try { ProcessBuilder("su", "-c", "pkill -f '[n]ode /root/claudechat/bridge.js'").start().waitFor() } catch (e: Exception) { } }
 
     /** [kill] = false (watchdog / auto start): never kill a bridge that may just be busy; a stale one makes the new one exit (EADDRINUSE). */
     fun startBridge(c: Context, kill: Boolean = true): Int? {

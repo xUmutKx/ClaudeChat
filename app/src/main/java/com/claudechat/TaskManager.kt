@@ -30,7 +30,7 @@ data class TaskInfo(val chatId: String, val title: String, val since: Long, val 
 /** A claude process kept alive by the bridge (one per chat, warm between turns). */
 data class BridgeProc(val chat: String, val pid: Int, val busy: Boolean, val idleSec: Int)
 
-private fun clock(ms: Long): String { val s = (ms / 1000).coerceAtLeast(0); return "%d:%02d".format(s / 60, s % 60) }
+private fun clock(ms: Long): String = clockText((ms / 1000).coerceAtLeast(0).toInt())
 
 /** Live view of everything running: chat turns, the shell command each one is on, sub-agents, and the bridge's claude processes. */
 @Composable
@@ -85,7 +85,7 @@ fun TaskManagerScreen(onBack: () -> Unit) {
                         Row(Modifier.padding(start = 14.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("claude · pid ${x.pid}", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
-                                Text(if (x.busy) tr("working", "çalışıyor") else tr("idle for ${x.idleSec}s (kept warm)", "${x.idleSec} sn boşta (hazır bekliyor)"), fontSize = 12.sp, color = cs.onSurfaceVariant)
+                                Text(if (x.busy) tr("working", "çalışıyor") else tr("idle for ${clockText(x.idleSec)} (kept warm)", "${clockText(x.idleSec)} boşta (hazır bekliyor)"), fontSize = 12.sp, color = cs.onSurfaceVariant)
                             }
                             TextButton({ Engine.killProc(x.chat) }) { Text(tr("Kill", "Sonlandır")) }
                         }
@@ -173,8 +173,12 @@ fun liveElapsed(b: BuildState?): Int {
     return if (b == null || b.elapsed < 0) -1 else b.elapsed + ((now - fetched) / 1000).toInt().coerceAtLeast(0)
 }
 
-/** 83 -> "1:23", 3725 -> "1:02:05"; -1 (unknown) -> "". */
-fun clockText(sec: Int): String = if (sec < 0) "" else if (sec >= 3600) "%d:%02d:%02d".format(sec / 3600, sec / 60 % 60, sec % 60) else "%d:%02d".format(sec / 60, sec % 60)
+/** 83 -> "01:23", 3725 -> "1:02:05" (hours only from one hour on); -1 (unknown) -> "". */
+fun clockText(sec: Int): String = when {
+    sec < 0 -> ""
+    sec >= 3600 -> "%d:%02d:%02d".format(sec / 3600, sec / 60 % 60, sec % 60)
+    else -> "%02d:%02d".format(sec / 60, sec % 60)
+}
 
 fun buildState(l: Triple<String, Int, String>): BuildState? {
     val text = l.third

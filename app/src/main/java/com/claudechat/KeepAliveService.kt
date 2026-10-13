@@ -89,15 +89,26 @@ class KeepAliveService : Service() {
                 Snap(st, det, msgs.lastOrNull { it.role == Role.Claude }?.text.orEmpty(), style, keep)
             }.collect { apply(it) }
         }
-        scope.launch { // watchdog: if Termux was killed and the bridge died, bring it back
-            delay(20_000)
+        scope.launch(Dispatchers.IO) { // watchdog: checks the bridge whatever the chat state; a dead one is started again, with growing pauses
+            delay(15_000)
             var fails = 0
+            var pause = 20_000L
             while (true) {
-                if (Prefs.autoStart.value && !Engine.overall.value.running) {
-                    if (Engine.ping() == 200) fails = 0
-                    else if (++fails >= 4) { fails = 0; Termux.startBridge(applicationContext, kill = false) }
+                if (Engine.ping() == 200) {
+                    fails = 0; pause = 20_000L
+                    if (Engine.bridge.value != 0) Engine.bridge.value = 200
+                    if (Engine.overall.value == Status.Offline) Engine.overall.value = Status.Idle
+                } else {
+                    fails++
+                    if (Engine.bridge.value != 0) Engine.bridge.value = -1
+                    if (!Engine.overall.value.running) Engine.overall.value = Status.Offline
+                    if (Prefs.autoStart.value && fails >= 2) {
+                        if (fails >= 6) Termux.killBridge() // alive but silent: it holds the port, so a new one would only exit
+                        Termux.startBridge(applicationContext, kill = false)
+                        pause = minOf(pause * 2, 300_000L)
+                    }
                 }
-                delay(20_000)
+                delay(pause)
             }
         }
         scope.launch { // black-mode options changed: rebuild the black layer
@@ -132,6 +143,8 @@ class KeepAliveService : Service() {
         // a build starts or ends: the notification changes at once, instead of keeping the last "Done"
         scope.launch { Engine.buildRunning.collect { startFg(label(lastSt, ""), lastSt.running) } }
         scope.launch { Prefs.mascotSkin.flow.collect { overlay.redraw(); startFg(fgText, fgWorking ?: false) } }
+        // a new colour for a state (or rainbow) shows on the pill at once, not at the next status change
+        scope.launch { kotlinx.coroutines.flow.merge(Prefs.buildColor.flow, Prefs.doneColor.flow, Prefs.bashColor.flow, Prefs.thinkColor.flow).collect { overlay.redraw() } }
         scope.launch { kotlinx.coroutines.flow.merge(Prefs.mascotChar.flow.map { }, Prefs.provider.flow.map { }).drop(2).collect { overlay.redraw(); overlay.buddy.refresh(); startFg(fgText, fgWorking ?: false) } }
         scope.launch { combine(AppState.foreground, Engine.demoShell) { fg, demo -> fg && !demo }.collect { overlay.setQuiet(it) } } // the shell preview also shows on the pill // chat open: its header mascot shows the status, so the pill hides
     }
@@ -178,12 +191,20 @@ class KeepAliveService : Service() {
         val pc = atComputer()
         val asleep = lastSt == Status.Idle && !Engine.buildRunning.value
         val faces = if (pc) Mascots.pc(false)
-            else listOf(if (asleep) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18))
+            else listOf(if (asleep) Mascots.r(R.drawable.ic_mascot_sleep_navy18) else Mascots.r(R.drawable.ic_mascot18))
         val blanket = asleep && Prefs.buddyBlanket.value == "1"
         val bm = Mascots.bitmap(this, faces, Outfit.hat(), blanket, if (pc) emptyList() else Wear.worn(asleep))
+        if (asleep) { // two drifting z's over the blanket, as in the buddy
+            val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.argb(230, 150, 170, 220); typeface = android.graphics.Typeface.DEFAULT_BOLD; textSize = 15f }
+            val cv = android.graphics.Canvas(bm); cv.drawText("z", 70f, 26f, p); p.textSize = 20f; cv.drawText("Z", 82f, 12f, p)
+        }
         if (!lastSt.running) return bm
-        val m = android.graphics.Matrix().apply { postRotate(Dance.ROT[frame % Dance.ROT.size], bm.width / 2f, bm.height / 2f) }
-        return android.graphics.Bitmap.createBitmap(bm, 0, 0, bm.width, bm.height, m, true)
+        // the dance: tilts left/right and hops up/down (the ears go up and down), drawn onto a picture of the same size
+        val f = frame % Dance.ROT.size
+        val m = android.graphics.Matrix().apply { postRotate(Dance.ROT[f], bm.width / 2f, bm.height / 2f); postTranslate(0f, -Dance.UP[f] * 6f) }
+        val out = android.graphics.Bitmap.createBitmap(bm.width, bm.height, android.graphics.Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(out).drawBitmap(bm, m, null)
+        return out
     }
 
     private var frame = 0

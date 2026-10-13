@@ -1,0 +1,7 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp" android:height="14dp" android:viewportWidth="20" android:viewportHeight="14">
+    <!-- asleep: the body is dark navy (the closed-eye mascot, same pixels as ic_mascot_sleep) -->
+    <path android:fillColor="#FF1E2A4A" android:pathData="M3,2H17V9H3Z M1,4H3V7H1Z M17,4H19V7H17Z M4,9H6V12H4Z M7,9H9V12H7Z M11,9H13V12H11Z M14,9H16V12H14Z" />
+    <!-- closed eyes: thin lines, light so they show on the navy -->
+    <path android:fillColor="#FFC9D6EE" android:pathData="M6,5.2H8V5.9H6Z M12,5.2H14V5.9H12Z" />
+</vector>

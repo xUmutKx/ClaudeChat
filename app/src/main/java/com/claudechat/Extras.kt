@@ -398,13 +398,20 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                 StatePreview(tr("Sleep", "Uyku")) { Mascot(false, Modifier.size(54.dp, 39.dp), sleeping = true) }
             }
             CharacterPicker()
-            Label(tr("Scene", "Ortam"))
-            ScenePicker()
-            run {
-                val dimStr by Prefs.sceneDim.flow.collectAsState()
-                var dim by remember(dimStr) { mutableFloatStateOf((dimStr.toIntOrNull() ?: 35).toFloat()) }
-                Text(tr("Darken the scene: ${dim.toInt()}%", "Ortamı karart: %${dim.toInt()}"), fontSize = 13.sp)
-                Slider(dim, { dim = it }, valueRange = 0f..90f, onValueChangeFinished = { Prefs.sceneDim.value = dim.toInt().toString() })
+            // the scene list is long: folded by default, the title opens it
+            var sceneOpen by rememberSaveable { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth().clickable { sceneOpen = !sceneOpen }.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(tr("Scene", "Ortam"), Modifier.weight(1f), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(if (sceneOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (sceneOpen) {
+                ScenePicker()
+                run {
+                    val dimStr by Prefs.sceneDim.flow.collectAsState()
+                    var dim by remember(dimStr) { mutableFloatStateOf((dimStr.toIntOrNull() ?: 35).toFloat()) }
+                    Text(tr("Darken the scene: ${dim.toInt()}%", "Ortamı karart: %${dim.toInt()}"), fontSize = 13.sp)
+                    Slider(dim, { dim = it }, valueRange = 0f..90f, onValueChangeFinished = { Prefs.sceneDim.value = dim.toInt().toString() })
+                }
             }
             Label(tr("Body colour", "Gövde rengi"))
             val defSkin = Mascots.DEFAULT_SKIN[Mascots.current()] ?: "orange"
@@ -431,7 +438,7 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                 val v = pref.flow.collectAsState().value
                 Label(name)
                 ColourRow(Color(StateColors.argb("current", 0f, theme)), v == "current", if (v == "current") null else Color(StateColors.argb(v, 0f, theme)),
-                    { pref.value = "current" }, { pref.value = StateColors.hex(it.toArgb()) })
+                    { pref.value = "current" }, { pref.value = StateColors.hex(it.toArgb()) }, { pref.value = "rainbow" }, rainbow = v == "rainbow")
             }
             // optional: a moving background for the pill (off by default)
             val pillBg by Prefs.pillBg.flow.collectAsState()
@@ -555,12 +562,28 @@ private fun WearTile(style: String) {
 
 /** One row of a colour setting: the swatch (the theme's own colour, or the dark "off" swatch), then the bar. */
 @Composable
-private fun ColourRow(swatch: Color, selected: Boolean, picked: Color?, onSwatch: () -> Unit, onPick: (Color) -> Unit) {
+private fun ColourRow(swatch: Color, selected: Boolean, picked: Color?, onSwatch: () -> Unit, onPick: (Color) -> Unit, onRainbow: (() -> Unit)? = null, rainbow: Boolean = false) {
+    // taps on the swatch within 1.5 s count up: the 2nd goes rainbow (when the row offers it), the 3rd is the default again
+    var taps by remember { mutableIntStateOf(0) }
+    var lastTap by remember { mutableStateOf(0L) }
+    // the rainbow moves through the hues, on the swatch and on the bar
+    val hue by rememberInfiniteTransition(label = "rowRainbow").animateFloat(0f, 360f, infiniteRepeatable(tween(4000, easing = LinearEasing)), label = "rowHue")
+    val shown = if (rainbow) Color(StateColors.argb("rainbow", hue, "pink")) else picked
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(Modifier.size(34.dp).clip(CircleShape).background(swatch)
-            .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
-            .clickable(onClick = onSwatch))
-        ColorPickBar(picked, onPick, Modifier.weight(1f))
+        // the picked colour shows here, beside the bar; the theme's own colour shows while nothing is picked
+        Box(Modifier.size(34.dp).clip(CircleShape).background(shown ?: swatch)
+            .then(if (selected || shown != null) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+            .clickable {
+                val now = System.currentTimeMillis()
+                taps = if (now - lastTap < 1500) taps + 1 else 1
+                lastTap = now
+                when {
+                    taps == 2 && onRainbow != null -> onRainbow()
+                    taps >= 3 -> { taps = 0; onSwatch() }
+                    shown == null -> onSwatch()
+                }
+            })
+        ColorPickBar(shown, onPick, Modifier.weight(1f))
     }
 }
 
@@ -580,18 +603,22 @@ fun ColorPickBar(current: Color?, onPick: (Color) -> Unit, modifier: Modifier = 
     val handlePx = with(LocalDensity.current) { handle.toPx() }
     val hues = remember { List(7) { Color(android.graphics.Color.HSVToColor(floatArrayOf(it * 60f, 1f, 1f))) } }
     var width by remember { mutableIntStateOf(0) }
-    var frac by remember(current) { mutableFloatStateOf(current?.let { StateColors.hueOf(it.toArgb()) / 360f } ?: 0f) }
+    // the handle sits where the current colour's hue is; only a drag in progress overrides it
+    var dragF by remember { mutableStateOf<Float?>(null) }
+    val frac = dragF ?: (current?.let { StateColors.hueOf(it.toArgb()) / 360f } ?: 0f)
     val pick by rememberUpdatedState(onPick)
     Box(modifier.height(handle).onSizeChanged { width = it.width }.pointerInput(Unit) {
         awaitEachGesture {
             fun at(x: Float) {
                 if (width <= handlePx) return
-                frac = ((x - handlePx / 2) / (width - handlePx)).coerceIn(0f, 1f)
-                pick(Color(android.graphics.Color.HSVToColor(floatArrayOf(frac * 360f, 1f, 1f))))
+                val f = ((x - handlePx / 2) / (width - handlePx)).coerceIn(0f, 1f)
+                dragF = f
+                pick(Color(android.graphics.Color.HSVToColor(floatArrayOf(f * 360f, 1f, 1f))))
             }
             val down = awaitFirstDown()
             at(down.position.x)
             drag(down.id) { ch -> ch.consume(); at(ch.position.x) }
+            dragF = null
         }
     }) {
         Box(Modifier.align(Alignment.Center).fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(Brush.horizontalGradient(hues)))

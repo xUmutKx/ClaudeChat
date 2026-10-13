@@ -290,7 +290,7 @@ object Dance {
 
 /** Mascot picture with the chosen outfit's hat on top (same pixel canvas as the pill's). */
 @Composable
-private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean = false, error: Boolean = false) {
+private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean = false, error: Boolean = false, asleep: Boolean = false) {
     val hat = Outfit.hat(Prefs.pillOutfit.flow.collectAsState().value)
     val skin = Prefs.mascotSkin.flow.collectAsState().value
     Prefs.mascotChar.flow.collectAsState().value; Prefs.provider.flow.collectAsState().value // follow the character
@@ -298,7 +298,7 @@ private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean =
     val wFeet by Prefs.wearFeet.flow.collectAsState(); val wLegs by Prefs.wearLegs.flow.collectAsState(); val wBody by Prefs.wearBody.flow.collectAsState()
     val wFace by Prefs.wearFace.flow.collectAsState(); val wEyes by Prefs.eyeColor.flow.collectAsState()
     val wear = Wear.layers(wFeet, wLegs, wBody, wFace, wEyes)
-    if (computer) { // a shell runs: a small laptop (back cover with an apple-like logo) in front of the mascot, its screen lighting the face green
+    if (computer) { // a shell runs: a small laptop (back cover with an apple-like logo) in front of the mascot, its screen glowing green inside the lid
         var alt by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(450); alt = !alt } }
         Box(modifier) {
@@ -316,13 +316,14 @@ private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean =
         return
     }
     val blanketOn = sleeping && Prefs.buddyBlanket.flow.collectAsState().value == "1"
-    if (hat == 0 && !blanketOn && wear.isEmpty()) { Image(painterResource(if (sleeping) Mascots.r(R.drawable.ic_mascot_sleep) else Mascots.r(R.drawable.ic_mascot)), null, modifier, colorFilter = tint); return }
+    // asleep the body is navy; a blink (closed eyes, not asleep) keeps the orange one
+    if (hat == 0 && !blanketOn && wear.isEmpty()) { Image(painterResource(if (sleeping) Mascots.r(if (asleep) R.drawable.ic_mascot_sleep_navy else R.drawable.ic_mascot_sleep) else Mascots.r(R.drawable.ic_mascot)), null, modifier, colorFilter = tint); return }
     // falling asleep: the blanket is pulled up over the body
     var pulled by remember { mutableStateOf(false) }
     LaunchedEffect(sleeping) { pulled = false; if (sleeping) { kotlinx.coroutines.delay(60); pulled = true } }
     val pull by animateFloatAsState(if (pulled) 1f else 0f, tween(900), label = "blanket")
     Box(modifier) {
-        Image(painterResource(if (sleeping) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18)), null, Modifier.fillMaxSize(), colorFilter = tint)
+        Image(painterResource(if (sleeping) Mascots.r(if (asleep) R.drawable.ic_mascot_sleep_navy18 else R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18)), null, Modifier.fillMaxSize(), colorFilter = tint)
         wear.forEach { Image(painterResource(it), null, Modifier.fillMaxSize()) }
         if (blanketOn) Image(painterResource(R.drawable.ic_blanket), null, Modifier.fillMaxSize().graphicsLayer { translationY = (1f - pull) * size.height * 0.45f; alpha = pull })
         if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxSize().hatFit())
@@ -421,7 +422,7 @@ fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false, comp
         val a by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "z")
         val a2 by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400, delayMillis = 700), RepeatMode.Reverse), label = "z2")
         Box(contentAlignment = Alignment.TopEnd) {
-            MascotImg(true, modifier)
+            MascotImg(true, modifier, asleep = true)
             // two z's, the second one bigger and half a beat later
             Text("z", Modifier.offset(x = 3.dp, y = (-4).dp).graphicsLayer { alpha = a }, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
             Text("Z", Modifier.offset(x = 10.dp, y = (-10).dp).graphicsLayer { alpha = a2 }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
@@ -645,7 +646,8 @@ private fun TypingBubble() {
         }
         Spacer(Modifier.width(6.dp))
         Text("$word…", color = orange, fontSize = 12.sp)
-        Text("  ${if (tick >= 0 && since > 0) ((System.currentTimeMillis() - since) / 1000).coerceAtLeast(0) else tick / 4}s", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+        val secs = if (since > 0) ((System.currentTimeMillis() - since) / 1000).coerceAtLeast(0) else tick / 4L
+        Text("  " + clockText(secs.toInt()), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
     }
 }
 

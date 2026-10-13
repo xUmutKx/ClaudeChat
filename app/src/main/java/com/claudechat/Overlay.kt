@@ -112,6 +112,8 @@ class Overlay(base: Context) {
     private var thought: ImageView? = null        // empty thought bubble while Claude thinks
     private var hammerView: ImageView? = null     // the hammer while a build runs (its own view, so it never sits on the bubble)
     private var hammerAnim: ObjectAnimator? = null
+    private var thoughtAnim: ObjectAnimator? = null // the thought bubble breathes while Claude thinks
+    private var doneSleep = false                  // done for a while: the mascot has gone to sleep, so the mark shows "zZ" instead of the tick
     private var blink: ValueAnimator? = null
     private var label: TextView? = null
     private var sub: TextView? = null
@@ -210,10 +212,10 @@ class Overlay(base: Context) {
         }
         val blanket = sleep && Prefs.buddyBlanket.value == "1"   // asleep under its blanket, like the buddy
         val worn = Wear.worn(sleep)
-        if (hat == 0 && !blanket && worn.isEmpty()) return d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep) else Mascots.r(R.drawable.ic_mascot))
+        if (hat == 0 && !blanket && worn.isEmpty()) return d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep_navy) else Mascots.r(R.drawable.ic_mascot))
         // outfit and blanket drawables share a taller 20x18 canvas so the hat fits above the head
         val layers = ArrayList<android.graphics.drawable.Drawable>()
-        layers.add(d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18)))
+        layers.add(d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep_navy18) else Mascots.r(R.drawable.ic_mascot18)))
         worn.forEach { layers.add(androidx.core.content.ContextCompat.getDrawable(ctx, it)!!.mutate()) }
         if (blanket) layers.add(androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_blanket)!!.mutate())
         if (hat != 0) layers.add(h(hat))
@@ -238,7 +240,7 @@ class Overlay(base: Context) {
     }
 
     private fun markOf(st: Status) = when (st) {
-        Status.Done -> "✓"
+        Status.Done -> if (doneSleep) "zZ" else "✓"
         Status.Error -> "✕"
         Status.Offline -> "!"
         Status.Idle -> "zZ" // asleep: a small z and a bigger Z, still
@@ -301,6 +303,7 @@ class Overlay(base: Context) {
                 }
             } else { blink?.cancel(); blink = null; t.visibility = View.GONE; t.text = ">_" }
         }
+        if (st != Status.Done) doneSleep = false
         mark?.text = if (buildOn) buildTag() else markOf(st)
         mark?.textSize = if (buildOn) 8f else 15f
         (mark?.layoutParams as? FrameLayout.LayoutParams)?.let { it.gravity = if (buildOn) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL else Gravity.CENTER; mark?.layoutParams = it }
@@ -319,6 +322,17 @@ class Overlay(base: Context) {
         }
         mark?.visibility = if (glyph == "build" || glyph == "mark") View.VISIBLE else View.GONE
         thought?.visibility = if (glyph == "think" && style == "pill") View.VISIBLE else View.GONE
+        // the bubble swells and shrinks while Claude thinks
+        thought?.let { tv ->
+            if (glyph == "think" && style == "pill") {
+                if (thoughtAnim == null) thoughtAnim = ObjectAnimator.ofPropertyValuesHolder(tv,
+                    android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 0.8f, 1.15f),
+                    android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.8f, 1.15f)).apply {
+                    duration = 900; repeatCount = ObjectAnimator.INFINITE; repeatMode = ObjectAnimator.REVERSE
+                    interpolator = android.view.animation.AccelerateDecelerateInterpolator(); start()
+                }
+            } else { thoughtAnim?.cancel(); thoughtAnim = null; tv.scaleX = 1f; tv.scaleY = 1f }
+        }
         errFace = st == Status.Error || st == Status.Offline
         mascot?.setImageDrawable(mascotDrawable(idleNow, st == Status.Background || shell))
         updateIdlePose(st)
@@ -331,7 +345,7 @@ class Overlay(base: Context) {
         if (style == "pill") {
             // idle: the mascot sleeps in the pill (eyes closed, "z"); done turns into sleep after a moment
             if (st == Status.Done) root?.let { r -> r.postDelayed({
-                if (lastStatus == Status.Done && !buildOn) mascot?.setImageDrawable(mascotDrawable(true))
+                if (lastStatus == Status.Done && !buildOn) { doneSleep = true; mascot?.setImageDrawable(mascotDrawable(true)); mark?.text = markOf(Status.Done) }
             }, 3500) }
             val show = !eventMode()
             val sides = emptyList<View>()
@@ -899,7 +913,7 @@ class Overlay(base: Context) {
                     // the hammer turns around the bottom end of its handle, which stays fixed; set once the size is known
                     addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> v.pivotX = v.width * 0.23f; v.pivotY = v.height * 0.9f }
                 }
-                icon.addView(hammerView, FrameLayout.LayoutParams(dp(13), dp(13), Gravity.CENTER))
+                icon.addView(hammerView, FrameLayout.LayoutParams(dp(17), dp(17), Gravity.CENTER))
                 box.addView(icon, lp(side))
                 if (mode == 2) box.addView(ring, lp(ringLen))
                 iconBox = icon; pillVertical = vertical; pillSide = side
@@ -1082,6 +1096,8 @@ class Overlay(base: Context) {
         tapRun?.let { main.removeCallbacks(it) }; tapRun = null; taps = 0
         pulse?.cancel(); bob?.cancel(); eyes?.cancel(); bBob?.cancel(); blink?.cancel(); blink = null; term = null
         pcAnim?.cancel(); pcAnim = null; zAnim?.cancel(); zAnim = null; sleepTimer?.let { main.removeCallbacks(it) }; sleepTimer = null; asleepHidden = false
+        // the hammer and the bubble belong to the views being removed: a new pill starts their animations again
+        hammerAnim?.cancel(); hammerAnim = null; hammerView = null; thoughtAnim?.cancel(); thoughtAnim = null; doneSleep = false
         root?.let { try { wm.removeView(it) } catch (e: Exception) { } }
         blackLayer?.let { try { wm.removeView(it) } catch (e: Exception) { } }; blackLayer = null
         bStatus = null; bDet = null; bLast = null; bBatt = null; bMascot = null; bBob = null
