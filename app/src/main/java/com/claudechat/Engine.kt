@@ -32,7 +32,10 @@ data class Msg(
 )
 
 /** One sub-agent (Task/Agent tool call) of the running turn: what it is doing right now and whether it finished. */
-data class AgentInfo(val id: String, val title: String, val kind: String, val activity: String = "", val tools: Int = 0, val done: Boolean = false, val bg: Boolean = false, val tokens: Int = 0, val lastMsg: String = "", val say: String = "", val err: Boolean = false)
+data class AgentInfo(val id: String, val title: String, val kind: String, val activity: String = "", val tools: Int = 0, val done: Boolean = false, val bg: Boolean = false, val tokens: Int = 0, val lastMsg: String = "", val say: String = "", val err: Boolean = false, val log: List<AgentLog> = emptyList())
+
+/** One entry of an agent's own log: kind is "tool", "text" or "result". */
+data class AgentLog(val time: Long, val kind: String, val text: String)
 
 data class Chat(val id: String, val title: String, val session: String, val cost: Double, val updated: Long)
 
@@ -124,6 +127,31 @@ object Engine {
         msgFile(id).writeText(arr.toString())
     } catch (e: Exception) { }
 
+    private fun agentsFile(id: String) = File(dir, "$id.agents.json")
+
+    // an agent still marked running when the chat is read again belongs to a turn that was cut off: it is finished now
+    private fun readAgents(id: String): List<AgentInfo> = try {
+        val arr = JSONArray(agentsFile(id).readText())
+        (0 until arr.length()).map {
+            val o = arr.getJSONObject(it)
+            val lg = o.optJSONArray("log") ?: JSONArray()
+            AgentInfo(o.getString("id"), o.getString("title"), o.optString("kind"), o.optString("activity"), o.optInt("tools"), done = true,
+                bg = o.optBoolean("bg"), tokens = o.optInt("tokens"), say = o.optString("say"), err = o.optBoolean("err"),
+                log = (0 until lg.length()).map { j -> lg.getJSONObject(j).let { e -> AgentLog(e.getLong("t"), e.getString("k"), e.getString("x")) } })
+        }
+    } catch (e: Exception) { emptyList() }
+
+    private fun writeAgents(id: String, list: List<AgentInfo>) = try {
+        val arr = JSONArray()
+        list.forEach { a ->
+            val lg = JSONArray()
+            a.log.forEach { lg.put(JSONObject().put("t", it.time).put("k", it.kind).put("x", it.text)) }
+            arr.put(JSONObject().put("id", a.id).put("title", a.title).put("kind", a.kind).put("activity", a.activity).put("tools", a.tools)
+                .put("bg", a.bg).put("tokens", a.tokens).put("say", a.say).put("err", a.err).put("log", lg))
+        }
+        agentsFile(id).writeText(arr.toString())
+    } catch (e: Exception) { }
+
     @Synchronized private fun writeIndex() = try {
         val arr = JSONArray()
         chats.value.forEach { arr.put(JSONObject().put("id", it.id).put("t", it.title).put("s", it.session).put("c", it.cost).put("u", it.updated)) }
@@ -141,6 +169,7 @@ object Engine {
             // a turn that was running when the app was closed keeps its start time, so the counter does not reset
             r.since = App.ctx.getSharedPreferences("runs", 0).getLong(id, 0L)
             r.messages.value = readMsgs(id)
+            r.agents.value = readAgents(id)
             r.nextId = (r.messages.value.maxOfOrNull { it.id } ?: 0) + 1
             r.cost.value = chats.value.firstOrNull { it.id == id }?.cost ?: 0.0
         }
@@ -204,6 +233,7 @@ object Engine {
     private fun save(r: Run) {
         updateChat(r.id) { it.copy(cost = r.cost.value, updated = System.currentTimeMillis()) }
         writeMsgs(r.id, r.messages.value)
+        writeAgents(r.id, r.agents.value)
         writeIndex()
     }
 
@@ -237,7 +267,7 @@ object Engine {
 
     fun deleteChat(id: String) {
         runs.remove(id)?.let { halt(it) }
-        msgFile(id).delete()
+        msgFile(id).delete(); agentsFile(id).delete()
         val wasCurrent = id == currentId.value
         chats.update { l -> l.filter { it.id != id } }
         writeIndex()
@@ -323,7 +353,8 @@ object Engine {
         http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/build")).header("X-Token", Termux.cleanToken()).build()).execute().use { resp ->
             if (!resp.isSuccessful) null else JSONObject(resp.body!!.string()).let { o ->
                 buildAlive = o.optBoolean("alive"); buildRunning.value = buildAlive; buildElapsed = o.optInt("elapsed", -1)
-                if (o.optString("file").isEmpty()) null else {
+                // only a full APK build counts here: a Kotlin-only check (_compile.log) says "finished" without any file
+                if (o.optString("file").isEmpty() || !o.optString("file").endsWith("_build.log")) null else {
                     val f = o.getString("file"); val text = o.optString("text")
                     // a new run of the same log file starts again from a short log: forget the old first-seen time
                     synchronized(buildSeen) { if (buildSeen[f] == null || (text.length < 600 && !text.contains("BUILD "))) buildSeen[f] = System.currentTimeMillis() - o.optInt("age") * 1000L }
@@ -471,8 +502,8 @@ object Engine {
 
     private suspend fun execute(r: Run, prompt: String) {
         r.curId = null; r.streamed = false; r.anyText = false; r.gotResult = false; r.interrupted = false; r.resumes = 0
-        // a new message clears only the finished agents: the ones still running keep their tile
-        r.agents.value = r.agents.value.filter { !it.done }; r.shell.value = false
+        // agents of earlier turns stay listed for the whole chat (only a new chat starts with none): a new message removes no tile
+        r.shell.value = false
         try {
             val pv = Providers.current()
             if (pv.id != "claude") { direct(r, pv); return }
@@ -707,8 +738,9 @@ object Engine {
                 for (i in 0 until content.length()) {
                     val b = content.getJSONObject(i)
                     when (b.optString("type")) {
-                        "tool_use" -> { act = toolSummary(b.optString("name"), b.optJSONObject("input")); used++ }
+                        "tool_use" -> { act = toolSummary(b.optString("name"), b.optJSONObject("input")); used++; logAgent(r, pid, "tool", act) }
                         "text" -> {
+                            logAgent(r, pid, "text", b.optString("text").trim())
                             val line = b.optString("text").lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim()
                             if (line.isNotEmpty()) say = line.take(80) // what it last said: its speech bubble
                             if (act.isEmpty()) act = line.take(90)
@@ -726,14 +758,18 @@ object Engine {
                     else it.copy(activity = act.ifEmpty { it.activity }, say = say.ifEmpty { it.say }, tools = it.tools + used, tokens = it.tokens + spent, lastMsg = mid.ifEmpty { it.lastMsg })
                 }
             }
-            "user" -> if (!sub) { // tool results: a finished Task/Agent call = that agent is done
-                r.shell.value = false
+            "user" -> { // tool results: a sub-agent's result goes into its log; a finished Task/Agent call = that agent is done
+                if (!sub) r.shell.value = false
                 val content = o.optJSONObject("message")?.optJSONArray("content")
                 if (content != null) for (i in 0 until content.length()) {
                     val b = content.optJSONObject(i) ?: continue
                     if (b.optString("type") == "tool_result") {
                         val id = b.optString("tool_use_id")
-                        r.agents.value = r.agents.value.map { if (it.id == id && !it.bg) it.copy(done = true) else it }
+                        if (sub) logAgent(r, o.optString("parent_tool_use_id"), "result", toolResultText(b))
+                        else {
+                            logAgent(r, id, "result", toolResultText(b))
+                            r.agents.value = r.agents.value.map { if (it.id == id && !it.bg) it.copy(done = true) else it }
+                        }
                     }
                 }
             }
@@ -812,6 +848,18 @@ object Engine {
             else -> try { sb.append(input.toString(2)) } catch (e: Exception) { }
         }
         return sb.toString().take(1500)
+    }
+
+    /** Appends one entry to a sub-agent's own log (what it ran, said, got back), with the time; the log is saved with the chat. */
+    private fun logAgent(r: Run, pid: String, kind: String, text: String) {
+        if (pid.isEmpty() || text.isBlank()) return
+        r.agents.value = r.agents.value.map { if (it.id == pid) it.copy(log = (it.log + AgentLog(System.currentTimeMillis(), kind, text)).takeLast(300)) else it }
+    }
+
+    private fun toolResultText(b: JSONObject): String {
+        val c = b.opt("content")
+        val s = if (c is JSONArray) (0 until c.length()).joinToString("\n") { c.optJSONObject(it)?.optString("text").orEmpty() } else b.optString("content")
+        return s.trim().take(1500)
     }
 
     private fun finish(r: Run, st: Status) {

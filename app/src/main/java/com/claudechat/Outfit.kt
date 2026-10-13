@@ -131,7 +131,7 @@ object Outfit {
         }
         // brown: the orange, darkened
         if (name == "brown") return floatArrayOf(.62f, 0f, 0f, 0f, 0f,  0f, .62f, 0f, 0f, 0f,  0f, 0f, .62f, 0f, 0f,  0f, 0f, 0f, 1f, 0f)
-        val target = HUE[name] ?: return null
+        val target = HUE[name] ?: if (StateColors.isHex(name)) StateColors.hueOf(android.graphics.Color.parseColor(name)) else return null
         val a = Math.toRadians((target - 15f).toDouble()); val c = Math.cos(a).toFloat(); val s = Math.sin(a).toFloat()
         return floatArrayOf(
             .213f + c * .787f - s * .213f, .715f - c * .715f - s * .715f, .072f - c * .072f + s * .928f, 0f, 0f,

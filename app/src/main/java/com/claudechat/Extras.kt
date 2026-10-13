@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 package com.claudechat
 
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,6 +13,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,8 +30,14 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -130,6 +138,11 @@ private fun AgentCall(agents: List<AgentInfo>) {
         }
         known = agents.size
     }
+    // no agent working: the panel goes away a moment after the last one finishes (its tiles already left)
+    val working = agents.any { !it.done }
+    var idle by remember { mutableStateOf(!working) }
+    LaunchedEffect(working) { if (working) idle = false else { delay(4500); idle = true } }
+    if (idle) return
     Surface(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), shape = RoundedCornerShape(16.dp), color = cs.surfaceContainer) {
         Column {
             Row(Modifier.fillMaxWidth().clickable { folded = !folded }.padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -137,86 +150,125 @@ private fun AgentCall(agents: List<AgentInfo>) {
                 Icon(if (folded) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess, null, Modifier.size(18.dp), tint = cs.onSurfaceVariant)
             }
             if (!folded) Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // a plain grid: three tiles a row, every tile the same size, no overlap
-                agents.take(12).chunked(3).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { a -> AgentTile(a, lift = a.id == speaker, talk = talk[a.id], Modifier.weight(1f)) { detailId = a.id } }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
+                // one scrolling row of fixed 104 dp tiles: adding an agent never resizes the others
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    agents.forEach { a -> AgentTile(a, lift = a.id == speaker, talk = talk[a.id]) { detailId = a.id } }
                 }
             }
         }
     }
-    agents.firstOrNull { it.id == detailId }?.let { a ->
-        AlertDialog(onDismissRequest = { detailId = "" }, confirmButton = { TextButton({ detailId = "" }) { Text(tr("Close", "Kapat")) } },
-            title = { Text(a.title) },
-            text = {
-                Column {
-                    Text(a.activity.ifBlank { tr("Nothing yet", "Henüz bir şey yok") })
-                    Text(when { a.done && a.err -> tr("Failed", "Hata verdi"); a.done -> tr("Finished", "Bitti"); else -> tr("Working", "Çalışıyor") },
-                        fontSize = 12.sp, color = cs.onSurfaceVariant)
-                }
-            })
-    }
+    agents.firstOrNull { it.id == detailId }?.let { a -> AgentLogDialog(a) { detailId = "" } }
 }
 
 /** Little props for the agent tiles, one per agent in turn. */
 private val AGENT_DECOR = listOf("☕", "🌵", "🎧", "📚", "🪴", "🧸", "🎮", "🔭", "🧩", "🕯️")
 
-/** One agent in the grid: title with a status dot, our mascot at its computer while it works, one line of what it says, its tokens. */
+/** One agent in the grid, a small video window, always 104 dp square: its room fills the tile edge to edge, the title sits in a thin strip on top, our mascot at its computer in the centre while it works (idle once finished), one line of what it says in a thin strip below, its tokens. */
 @Composable
-private fun AgentTile(a: AgentInfo, lift: Boolean, talk: String?, modifier: Modifier, onClick: () -> Unit) {
+private fun AgentTile(a: AgentInfo, lift: Boolean, talk: String?, onClick: () -> Unit) {
+    // a finished agent leaves the call a few seconds after it ends; its log stays in its history
+    var gone by remember(a.id) { mutableStateOf(false) }
+    LaunchedEffect(a.done) { if (a.done) { kotlinx.coroutines.delay(4000); gone = true } else gone = false }
+    if (gone) return
     val cs = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(12.dp)
-    val fade by animateFloatAsState(if (a.done) 0.55f else 1f, label = "agentFade")
-    Column(
-        modifier.graphicsLayer { alpha = fade }.clip(shape)
-            .background(if (lift) cs.primaryContainer else cs.surfaceContainerHigh)
+    Box(
+        Modifier.size(96.dp).clip(shape)
+            .then(if (lift) Modifier.border(2.dp, cs.primary, shape) else Modifier)
             .clickable(onClick = onClick),
     ) {
-        Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHighest).padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Image(painterResource(roomRes(roomFor(a.id))), null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+        // video-call close-up: head and shoulders at the bottom edge, cut by the tile, the room behind; no laptop, so no green glow
+        Mascot(!a.done, Modifier.size(92.dp).align(Alignment.BottomCenter).offset(y = 22.dp), idle = a.done)
+        Text(AGENT_DECOR[Engine.agents.value.indexOf(a).coerceAtLeast(0) % AGENT_DECOR.size], Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 4.dp), fontSize = 13.sp)
+        Row(Modifier.align(Alignment.TopStart).fillMaxWidth().background(cs.surfaceContainerHighest.copy(alpha = .6f)).padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (a.done) Icon(Icons.Filled.Check, null, Modifier.size(10.dp), tint = Color(0xFF4CAF50)) else PulseDot(Color(0xFF2196F3))
             Spacer(Modifier.width(5.dp))
             Text(a.title, Modifier.weight(1f), fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
-            // a running agent sits at its computer; a finished one sleeps
-            Mascot(!a.done, Modifier.size(44.dp, 34.dp), computer = !a.done, sleeping = a.done)
-            Text(AGENT_DECOR[Engine.agents.value.indexOf(a).coerceAtLeast(0) % AGENT_DECOR.size], Modifier.align(Alignment.TopEnd).padding(2.dp), fontSize = 13.sp)
+        Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color.Black.copy(alpha = .2f)).padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(talk ?: a.say.ifEmpty { a.activity }, Modifier.weight(1f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color.White)
+            if (a.tokens > 0) Text(tokenText(a.tokens), Modifier.padding(start = 4.dp), fontSize = 9.sp, color = Color.White)
         }
-        Text(talk ?: a.say.ifEmpty { a.activity }, Modifier.padding(horizontal = 6.dp), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onSurfaceVariant)
-        if (a.tokens > 0) Text(tokenText(a.tokens), Modifier.padding(start = 6.dp, bottom = 4.dp), fontSize = 9.sp, color = cs.onSurfaceVariant)
     }
 }
 
-/** Settings > Agents as tiles: each running agent is a square tile with our mascot. The newest running agent (the one speaking) is highlighted; tap shows what it last said. */
+/** Settings > Agents as tiles: every agent of the turn is a fixed 104 dp square tile with our mascot, kept until the next message. The newest running agent (the one speaking) is highlighted; tap shows what it said. */
 @Composable
 fun AgentGrid() {
     val on by Prefs.agentGrid.flow.collectAsState()
     val agents by Engine.agents.collectAsState()
-    val running = agents.filter { !it.done }
-    if (!on || running.isEmpty()) return
+    if (!on || agents.isEmpty()) return
     val cs = MaterialTheme.colorScheme
-    val speaker = running.last().id
+    val speaker = agents.lastOrNull { !it.done }?.id
     var detailId by rememberSaveable { mutableStateOf("") }
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        running.forEach { a ->
+        agents.forEach { a ->
             val lift = a.id == speaker
             Column(
-                Modifier.size(84.dp).clip(RoundedCornerShape(12.dp)).background(if (lift) cs.primaryContainer else cs.surfaceContainerHigh)
+                Modifier.size(104.dp).clip(RoundedCornerShape(12.dp)).background(if (lift) cs.primaryContainer else cs.surfaceContainerHigh)
                     .clickable { detailId = a.id }.padding(6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Mascot(true, Modifier.size(44.dp, 34.dp)) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Mascot(!a.done, Modifier.size(44.dp, 34.dp), idle = a.done) }
                 Text(a.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (lift) FontWeight.Bold else FontWeight.Normal)
             }
         }
     }
-    running.firstOrNull { it.id == detailId }?.let { a ->
-        // there is no separate chat per sub-agent, so the tile opens what it has said and done so far
-        AlertDialog(onDismissRequest = { detailId = "" }, confirmButton = { TextButton({ detailId = "" }) { Text(tr("Close", "Kapat")) } },
-            title = { Text(a.title) },
-            text = { Text(listOf(a.kind, a.activity, a.say).filter { it.isNotBlank() }.joinToString("\n")) })
+    val talk = agents.filter { it.say.isNotEmpty() }.takeLast(6)
+    if (talk.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
+        talk.forEach { a -> Text(a.title + ": " + a.say, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = cs.onSurfaceVariant) }
+    }
+    agents.firstOrNull { it.id == detailId }?.let { a -> AgentLogDialog(a) { detailId = "" } }
+}
+
+/** One line of an agent's log, drawn like the main chat: a command card, a result box, or the agent's reply as markdown. */
+@Composable
+private fun AgentLogLine(e: AgentLog, fmt: java.text.SimpleDateFormat) {
+    val cs = MaterialTheme.colorScheme
+    when (e.kind) {
+        "tool" -> Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = cs.surfaceContainerHighest) {
+            Column(Modifier.padding(10.dp)) {
+                Text(fmt.format(e.time) + " · " + tr("Command", "Komut"), fontSize = 11.sp, color = cs.onSurfaceVariant)
+                Text("$ " + e.text, fontSize = 13.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, color = cs.onSurface)
+            }
+        }
+        "result" -> Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = cs.surfaceContainer) {
+            Column(Modifier.padding(10.dp)) {
+                Text(fmt.format(e.time) + " · " + tr("Output", "Çıktı"), fontSize = 11.sp, color = cs.onSurfaceVariant)
+                Text(e.text, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, color = cs.onSurfaceVariant)
+            }
+        }
+        else -> Column(Modifier.fillMaxWidth()) {
+            Text(fmt.format(e.time), fontSize = 11.sp, color = cs.onSurfaceVariant)
+            MarkdownText(e.text, cs.onSurface)
+        }
+    }
+}
+
+/** Tapping an agent tile: a full-height sheet with that agent's own log (its tool calls, texts and results, with the time), newest last. */
+@Composable
+fun AgentLogDialog(a: AgentInfo, onClose: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val fmt = remember { java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US) }
+    val list = rememberLazyListState()
+    LaunchedEffect(a.log.size) { if (a.log.isNotEmpty()) list.animateScrollToItem(a.log.size - 1) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize().padding(vertical = 24.dp, horizontal = 8.dp), shape = RoundedCornerShape(20.dp), color = cs.surfaceContainerHigh) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(a.title, Modifier.weight(1f), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TextButton(onClose) { Text(tr("Close", "Kapat")) }
+                }
+                Text(when { a.done && a.err -> tr("Failed", "Hata verdi"); a.done -> tr("Done", "Bitti"); else -> tr("Running", "Çalışıyor") },
+                    fontSize = 12.sp, color = cs.onSurfaceVariant)
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                if (a.log.isEmpty()) Text(tr("Nothing yet", "Henüz bir şey yok"), color = cs.onSurfaceVariant)
+                LazyColumn(Modifier.weight(1f), state = list, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(a.log) { e -> AgentLogLine(e, fmt) }
+                }
+            }
+        }
     }
 }
 
@@ -355,27 +407,17 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                 Slider(dim, { dim = it }, valueRange = 0f..90f, onValueChangeFinished = { Prefs.sceneDim.value = dim.toInt().toString() })
             }
             Label(tr("Body colour", "Gövde rengi"))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Outfit.SKINS.forEach { k ->
-                    Box(Modifier.size(34.dp).clip(CircleShape).background(Color(Outfit.SKIN_SWATCH[k] ?: 0xFFD97757))
-                        .then(if (skin == k) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
-                        .clickable { Mascots.setSkin(Mascots.current(), k) })
-                }
-            }
-            // previews only, no captions: each tile is the thing itself
+            val defSkin = Mascots.DEFAULT_SKIN[Mascots.current()] ?: "orange"
+            ColourRow(Color(Outfit.SKIN_SWATCH[defSkin] ?: 0xFFD97757), skin == defSkin, if (skin == defSkin) null else skinColor(skin),
+                { Mascots.setSkin(Mascots.current(), defSkin) }, { Mascots.setSkin(Mascots.current(), StateColors.hex(it.toArgb())) })
+            // the glow: the dark swatch switches it off, the bar picks any colour
             val glow by Prefs.pillGlow.flow.collectAsState()
             Label(tr("Glow behind the mascot", "Maskotun arkasındaki ışık"))
-            PreviewTiles(listOf("none" to tr("None", "Yok"), "cyan" to "Cyan", "pink" to tr("Pink", "Pembe"), "gold" to tr("Gold", "Altın"), "green" to tr("Green", "Yeşil")), glow, { Prefs.pillGlow.value = it }, 46, 46) { k ->
-                Box(Modifier.size(26.dp).clip(CircleShape).background(if (glowArgb(k) == 0) Color(0xFF111114) else Color(glowArgb(k))))
-            }
+            GlowRow(glow) { Prefs.pillGlow.value = it }
             val buddyGlow by Prefs.buddyGlow.flow.collectAsState()
             Label(tr("Glow behind the buddy", "Buddy'nin arkasındaki ışık"))
-            PreviewTiles(listOf("none" to tr("None", "Yok"), "cyan" to "Cyan", "pink" to tr("Pink", "Pembe"), "gold" to tr("Gold", "Altın"), "green" to tr("Green", "Yeşil")), buddyGlow, { Prefs.buddyGlow.value = it }, 46, 46) { k ->
-                Box(Modifier.size(26.dp).clip(CircleShape).background(if (glowArgb(k) == 0) Color(0xFF111114) else Color(glowArgb(k))))
-            }
-            // one colour per state for the pill and the header; "rainbow" cycles through the hues
-            val buildC by Prefs.buildColor.flow.collectAsState(); val bashC by Prefs.bashColor.flow.collectAsState()
-            val thinkC by Prefs.thinkColor.flow.collectAsState(); val doneC by Prefs.doneColor.flow.collectAsState()
+            GlowRow(buddyGlow) { Prefs.buddyGlow.value = it }
+            // one colour per state for the pill and the header; the swatch is the theme's own colour, the bar picks any other
             // collapsed by default: the four rows are only shown when opened
             var colourOpen by rememberSaveable { mutableStateOf(false) }
             Row(Modifier.fillMaxWidth().clickable { colourOpen = !colourOpen }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -383,13 +425,13 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                 Icon(if (colourOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null)
             }
             if (colourOpen) listOf(
-                Triple(tr("Build", "Derleme"), buildC, Prefs.buildColor), Triple("Bash", bashC, Prefs.bashColor),
-                Triple(tr("Thinking", "Düşünme"), thinkC, Prefs.thinkColor), Triple(tr("Done", "Bitti"), doneC, Prefs.doneColor),
-            ).forEach { (name, cur, pref) ->
+                Triple(tr("Build", "Derleme"), Prefs.buildColor, "pink"), Triple("Bash", Prefs.bashColor, "blue"),
+                Triple(tr("Thinking", "Düşünme"), Prefs.thinkColor, "white"), Triple(tr("Done", "Bitti"), Prefs.doneColor, "green"),
+            ).forEach { (name, pref, theme) ->
+                val v = pref.flow.collectAsState().value
                 Label(name)
-                PreviewTiles(StateColors.CHOICES.map { it.first to tr(it.second, it.third) }, cur, { pref.value = it }, 34, 34) { k ->
-                    Box(Modifier.size(20.dp).clip(CircleShape).background(stateBrush(k)))
-                }
+                ColourRow(Color(StateColors.argb("current", 0f, theme)), v == "current", if (v == "current") null else Color(StateColors.argb(v, 0f, theme)),
+                    { pref.value = "current" }, { pref.value = StateColors.hex(it.toArgb()) })
             }
             // optional: a moving background for the pill (off by default)
             val pillBg by Prefs.pillBg.flow.collectAsState()
@@ -511,10 +553,53 @@ private fun WearTile(style: String) {
     }
 }
 
-/** A colour chip for the Customize picker: one colour, or a rainbow sweep for "rainbow". */
-private fun stateBrush(k: String): androidx.compose.ui.graphics.Brush =
-    if (k == "rainbow") androidx.compose.ui.graphics.Brush.sweepGradient(listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red))
-    else androidx.compose.ui.graphics.SolidColor(Color(StateColors.tileColor(k)))
+/** One row of a colour setting: the swatch (the theme's own colour, or the dark "off" swatch), then the bar. */
+@Composable
+private fun ColourRow(swatch: Color, selected: Boolean, picked: Color?, onSwatch: () -> Unit, onPick: (Color) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.size(34.dp).clip(CircleShape).background(swatch)
+            .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+            .clickable(onClick = onSwatch))
+        ColorPickBar(picked, onPick, Modifier.weight(1f))
+    }
+}
+
+/** A glow row: the first swatch ("none") switches the light off. */
+@Composable
+private fun GlowRow(v: String, set: (String) -> Unit) = ColourRow(Color(0xFF111114), v == "none" || v == "current",
+    glowArgb(v).takeIf { it != 0 }?.let { Color(it) }, { set("none") }, { set(StateColors.hex(it.toArgb())) })
+
+/** A body colour: "#RRGGBB" or an old preset name. */
+private fun skinColor(s: String): Color =
+    if (StateColors.isHex(s)) Color(android.graphics.Color.parseColor(s)) else Color(Outfit.SKIN_SWATCH[s] ?: 0xFFD97757)
+
+/** A rainbow bar (hue 0..360, full saturation and brightness). Tap or drag picks a colour; the handle shows [current], hidden when null. */
+@Composable
+fun ColorPickBar(current: Color?, onPick: (Color) -> Unit, modifier: Modifier = Modifier) {
+    val handle = 26.dp
+    val handlePx = with(LocalDensity.current) { handle.toPx() }
+    val hues = remember { List(7) { Color(android.graphics.Color.HSVToColor(floatArrayOf(it * 60f, 1f, 1f))) } }
+    var width by remember { mutableIntStateOf(0) }
+    var frac by remember(current) { mutableFloatStateOf(current?.let { StateColors.hueOf(it.toArgb()) / 360f } ?: 0f) }
+    val pick by rememberUpdatedState(onPick)
+    Box(modifier.height(handle).onSizeChanged { width = it.width }.pointerInput(Unit) {
+        awaitEachGesture {
+            fun at(x: Float) {
+                if (width <= handlePx) return
+                frac = ((x - handlePx / 2) / (width - handlePx)).coerceIn(0f, 1f)
+                pick(Color(android.graphics.Color.HSVToColor(floatArrayOf(frac * 360f, 1f, 1f))))
+            }
+            val down = awaitFirstDown()
+            at(down.position.x)
+            drag(down.id) { ch -> ch.consume(); at(ch.position.x) }
+        }
+    }) {
+        Box(Modifier.align(Alignment.Center).fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(Brush.horizontalGradient(hues)))
+        if (current != null) Box(Modifier.align(Alignment.CenterStart)
+            .offset { IntOffset(Math.round(frac * (width - handlePx)), 0) }
+            .size(handle).clip(CircleShape).background(current).border(3.dp, Color.White, CircleShape))
+    }
+}
 
 /** Tiles that show the option itself (no caption). The name is only read out by screen readers. */
 @Composable

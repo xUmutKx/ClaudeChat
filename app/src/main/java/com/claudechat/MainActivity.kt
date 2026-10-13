@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
                 }
                 var screen by rememberSaveable { mutableStateOf("chat") }
                 LaunchedEffect(jump.value) { jump.value?.let { screen = it; jump.value = null } }
-                BackHandler(screen != "chat") { screen = if (screen == "guide" || screen == "setup" || screen == "tasks") "settings" else "chat" }
+                BackHandler(screen != "chat") { screen = if (screen == "guide" || screen == "setup" || screen == "tasks") "settings" else if (screen == "sessions") "chats" else "chat" }
                 // going deeper slides in from the right, going back from the left (like the system settings), not a blind cross-fade
                 fun depth(s: String) = when (s) { "chat" -> 0; "settings", "chats" -> 1; else -> 2 }
                 // the startup mascot fades out over the chat, which is already drawn underneath (no blank screen at launch)
@@ -66,7 +66,8 @@ class MainActivity : ComponentActivity() {
                             "guide" -> GuideScreen { screen = "settings" }
                             "setup" -> SetupScreen { screen = "chat" }
                             "tasks" -> TaskManagerScreen { screen = "settings" }
-                            "chats" -> ChatsScreen({ screen = "chat" }, { screen = "chat" })
+                            "chats" -> ChatsScreen({ screen = "chat" }, { screen = "chat" }, { screen = "sessions" })
+                            "sessions" -> SessionsScreen { screen = "chats" }
                             else -> ChatScreen({ screen = "settings" }, { screen = "chats" }, { screen = "setup" }, { screen = "tasks" })
                         }
                     }

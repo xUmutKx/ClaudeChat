@@ -55,8 +55,10 @@ object Termux {
         val port = Prefs.port.value.filter(Char::isDigit).ifEmpty { "8787" }
         val token = cleanToken()
         return "mkdir -p /root/claudechat; : > /root/claudechat/bridge.log; echo $b64 | base64 -d > /root/claudechat/bridge.js; " +
-            (if (kill) "pkill -f '^node /root/claudechat/bridge.js'; sleep 0.3;" else "") +
-            "CC_TOKEN=$token CC_PORT=$port exec node /root/claudechat/bridge.js" + if (toFile) " >>/root/claudechat/bridge.log 2>&1" else ""
+            (if (kill) "pkill -f '[c]laudechat/bridge.js'; sleep 0.3;" else "") +
+            // keep the bridge up: if node exits or crashes, the same loop starts it again after 2 s (the log keeps the reason)
+            "while :; do CC_TOKEN=$token CC_PORT=$port node /root/claudechat/bridge.js" + (if (toFile) " >>/root/claudechat/bridge.log 2>&1" else "") +
+            "; echo \"[\$(date +%T)] bridge stopped, restarting in 2 s\" >>/root/claudechat/bridge.log; sleep 2; done"
     }
 
     /** One line to paste into Termux by hand: needs no permission, root or allow-external-apps. */

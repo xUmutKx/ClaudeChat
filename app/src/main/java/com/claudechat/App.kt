@@ -91,7 +91,7 @@ object Prefs {
     lateinit var roomOwned: S   // bought decorations, "slot:name" separated by commas
     lateinit var roomFrag: S    // code fragments, earned by the room's activities and spent in its shop
     lateinit var guideHidden: S // "1" once the first-run guide was dismissed
-    lateinit var buildColor: S  // pill outside and header ring while a build runs (StateColors keys)
+    lateinit var buildColor: S  // pill outside and header ring while a build runs (StateColors key, #RRGGBB, or current = the theme colour)
     lateinit var doneColor: S   // pill outside and header ring when Claude is done
     lateinit var bashColor: S   // while Claude runs a Bash command
     lateinit var thinkColor: S  // while Claude thinks
@@ -110,6 +110,7 @@ object Prefs {
     lateinit var showHeaderMascot: S // "1"/"0": mascot at the top left of the chat screen
     lateinit var showNotifMascot: S  // "1"/"0": mascot inside the keep-alive notification
     lateinit var mascotScene: S      // background scene behind the mascot: none / beach / forest / home / library / cave / sea / plane
+    lateinit var ringStyle: S        // camera ring around the pill: "new" (narrower, cut 6 px at the top) or "old" (the first ring)
     lateinit var sceneDim: S         // percent of black drawn over the scene (behind the mascot), 0..90
     lateinit var pillEvents: S       // "1": the pill only appears when something changes
     lateinit var pillFill: S         // pill background opacity, percent (0..100)
@@ -204,10 +205,10 @@ object Prefs {
         roomRug = S("roomRug", "plain"); roomArt = S("roomArt", "none"); roomPlant = S("roomPlant", "bonsai")
         roomOwned = S("roomOwned", "rug:plain,art:none,plant:bonsai"); roomFrag = S("roomFrag", "0")
         guideHidden = S("guideHidden", "0")
-        buildColor = S("buildColor", "pink")
-        doneColor = S("doneColor", "green")
-        bashColor = S("bashColor", "blue")
-        thinkColor = S("thinkColor", "white")
+        buildColor = S("buildColor", "current")
+        doneColor = S("doneColor", "current")
+        bashColor = S("bashColor", "current")
+        thinkColor = S("thinkColor", "current")
         pillGap = S("pillGap", "1")
         pillBubble = S("pillBubble", "1")
         mascotChar = S("mascotChar", "auto")
@@ -223,6 +224,7 @@ object Prefs {
         showHeaderMascot = S("showHeaderMascot", "1")
         showNotifMascot = S("showNotifMascot", "1")
         mascotScene = S("mascotScene", "none")
+        ringStyle = S("ringStyle", "new")
         sceneDim = S("sceneDim", "35")
         pillEvents = S("pillEvents", "0")
         pillHold = S("pillHold", "4")

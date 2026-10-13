@@ -142,6 +142,47 @@ async function authStatus() {
   return { claude, gh };
 }
 
+// read-only Claude Code session transcripts (~/.claude/projects/<encoded cwd>/<id>.jsonl), listed and read by the app's Sessions screen
+const SESS_ROOT = path.join(process.env.HOME || '/root', '.claude', 'projects');
+const SESS_FILE = /^[^/\\]+\/[A-Za-z0-9_-]+\.jsonl$/;
+function sessReadAt(file, pos, len) {
+  const fd = fs.openSync(file, 'r');
+  try { const b = Buffer.alloc(len); const n = fs.readSync(fd, b, 0, len, pos); return b.toString('utf8', 0, n); } finally { fs.closeSync(fd); }
+}
+// user and assistant text, in order (tool calls and results are left out)
+function sessEvents(text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('{')) continue;
+    let o; try { o = JSON.parse(line); } catch (e) { continue; }
+    if ((o.type !== 'user' && o.type !== 'assistant') || o.isMeta) continue;
+    const c = o.message && o.message.content;
+    const t = (typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n') : '').trim();
+    if (t) out.push({ role: o.type, text: t, time: o.timestamp || '' });
+  }
+  return out;
+}
+function sessList() {
+  const found = [];
+  let dirs = []; try { dirs = fs.readdirSync(SESS_ROOT); } catch (e) { return []; }
+  for (const d of dirs) {
+    let files = []; try { files = fs.readdirSync(path.join(SESS_ROOT, d)); } catch (e) { continue; }
+    for (const f of files) {
+      const rel = d + '/' + f;
+      if (!SESS_FILE.test(rel)) continue;
+      try { const st = fs.statSync(path.join(SESS_ROOT, rel)); if (st.isFile()) found.push({ rel, f, st }); } catch (e) {}
+    }
+  }
+  return found.sort((a, b) => b.st.mtimeMs - a.st.mtimeMs).slice(0, 300).map(({ rel, f, st }) => {
+    const file = path.join(SESS_ROOT, rel);
+    const head = sessEvents(sessReadAt(file, 0, Math.min(st.size, 65536)));
+    const tail = sessEvents(sessReadAt(file, Math.max(0, st.size - 65536), Math.min(st.size, 65536)));
+    const cut = (t) => (t || '').replace(/\s+/g, ' ').slice(0, 160);
+    const first = head.find((m) => m.role === 'user');
+    return { f: rel, id: f.slice(0, -6), title: cut(first && first.text), last: cut(tail.length ? tail[tail.length - 1].text : ''), time: st.mtimeMs, size: st.size };
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   if (TOKEN && req.headers['x-token'] !== TOKEN) { res.writeHead(401); return res.end('unauthorized'); }
   if (req.method === 'GET' && req.url === '/ping') { res.writeHead(200); return res.end('pong'); }
@@ -258,6 +299,20 @@ const server = http.createServer(async (req, res) => {
     const title = await makeTitle(String(b.user || '').slice(0, 600), String(b.reply || '').slice(0, 600));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ title }));
+  }
+  if (req.method === 'GET' && req.url === '/sessions') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ sessions: sessList() }));
+  }
+  if (req.method === 'GET' && req.url.startsWith('/sessions/one?')) {
+    let rel = '';
+    try { rel = decodeURIComponent((req.url.split('f=')[1] || '').split('&')[0]); } catch (e) {}
+    const file = path.resolve(SESS_ROOT, rel);
+    if (!SESS_FILE.test(rel) || !file.startsWith(SESS_ROOT + path.sep)) { res.writeHead(400); return res.end('bad session'); }
+    let st; try { st = fs.statSync(file); } catch (e) { res.writeHead(404); return res.end('no session'); }
+    if (st.size > 32e6) { res.writeHead(413); return res.end('too large'); }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ messages: sessEvents(fs.readFileSync(file, 'utf8')) }));
   }
   if (req.method !== 'POST' || req.url !== '/chat') { res.writeHead(404); return res.end(); }
 

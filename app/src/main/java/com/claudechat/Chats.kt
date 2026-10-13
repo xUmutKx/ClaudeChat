@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,7 +29,7 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
+fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit, onSessions: () -> Unit) {
     val chats by Engine.chats.collectAsState()
     val cur by Engine.currentId.collectAsState()
     val busy by Engine.busy.collectAsState()
@@ -46,6 +47,7 @@ fun ChatsScreen(onBack: () -> Unit, onOpen: () -> Unit) {
             Row(Modifier.statusBarsPadding().fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) }
                 Text(stringResource(R.string.chats_title), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                IconButton(onSessions) { Icon(Icons.Filled.History, "Sessions") }
                 IconButton({ Engine.newChat(); onOpen() }) { Icon(Icons.Filled.AddComment, stringResource(R.string.new_chat)) }
             }
         }

@@ -304,6 +304,24 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             }) { Text(stringResource(R.string.root_setup)) }
             Hint(stringResource(R.string.termux_setup))
             CodeLine(Termux.SETUP_CMD)
+            Hint(tr("Atomic Agent runs local models through Termux. The install downloads its release archive into Termux. Atomic Agent lists macOS, Linux and Windows as supported, so the installer may stop on Android; the output shows in Termux.",
+                "Atomic Agent yerel modelleri Termux üzerinden çalıştırır. Kurulum sürüm arşivini Termux'a indirir. Atomic Agent'ın desteklenen platformları macOS, Linux ve Windows; kurulum Android'de durabilir, çıktı Termux'ta görünür."))
+            Button({
+                scope.launch {
+                    val err = withContext(Dispatchers.IO) { Termux.run(ctx, "curl -fsSL https://atomicagent.io/install | sh") }
+                    android.widget.Toast.makeText(ctx, err?.let { ctx.getString(it) } ?: tr("Install started in Termux. Watch Termux for progress.", "Kurulum Termux'ta başladı; ilerlemeyi Termux'tan izle."), android.widget.Toast.LENGTH_LONG).show()
+                }
+            }) { Text(tr("Install Atomic Agent", "Atomic Agent'ı kur")) }
+            Button({
+                scope.launch {
+                    // one random key, kept for the Atomic Agent provider; the server only listens on 127.0.0.1
+                    val key = Providers.field("atomic", "key").ifEmpty { java.util.UUID.randomUUID().toString() }
+                    Providers.set("atomic", "key", key)
+                    val cmd = "atomic-agent serve --host 127.0.0.1 --port 8787 --cwd \$HOME --api-key $key --no-parent-exit"
+                    val err = withContext(Dispatchers.IO) { Termux.run(ctx, cmd) }
+                    android.widget.Toast.makeText(ctx, err?.let { ctx.getString(it) } ?: tr("Atomic Agent server starting in Termux.", "Atomic Agent sunucusu Termux'ta başlıyor."), android.widget.Toast.LENGTH_LONG).show()
+                }
+            }) { Text(tr("Start Atomic Agent server", "Atomic Agent sunucusunu başlat")) }
         }
 
             Sub(R.string.sec_manual)

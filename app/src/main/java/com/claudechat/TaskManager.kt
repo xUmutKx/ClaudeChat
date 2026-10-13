@@ -178,7 +178,13 @@ fun clockText(sec: Int): String = if (sec < 0) "" else if (sec >= 3600) "%d:%02d
 
 fun buildState(l: Triple<String, Int, String>): BuildState? {
     val text = l.third
-    val ok = text.contains("BUILD SUCCESSFUL"); val failed = text.contains("BUILD FAILED")
+    // a Kotlin-only check (compileReleaseKotlin) also ends with BUILD SUCCESSFUL, but it makes no APK: only a full assembleRelease counts as a build
+    val full = text.contains("assemble")
+    val finished = text.contains("BUILD SUCCESSFUL") || text.contains("BUILD FAILED")
+    if (finished && !full) return null
+    // a finished line only counts when the Gradle process is gone: a log can say BUILD SUCCESSFUL while a new run is still going
+    val alive = Engine.buildAlive
+    val ok = finished && text.contains("BUILD SUCCESSFUL") && !alive; val failed = text.contains("BUILD FAILED") && !alive
     val running = !ok && !failed && (Engine.buildAlive || l.second < 90)   // a live Gradle process, or output in the last minute
     if (!ok && !failed && !running) return null
     val tasks = Regex("> Task (:\\S+)").findAll(text).map { it.groupValues[1] }.toList()

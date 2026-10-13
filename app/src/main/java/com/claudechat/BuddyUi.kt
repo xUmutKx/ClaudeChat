@@ -57,6 +57,8 @@ fun BuddySettings() {
     if (Prefs.buddyBubble.flow.collectAsState().value == "1") {
         PrefSwitch(tr("Say what Claude is doing while it works", "Claude çalışırken ne yaptığını söylesin"), Prefs.buddyBubbleWork)
         Text(tr("Shape", "Biçim"), style = MaterialTheme.typography.bodyLarge)
+        Sub(tr("Camera ring", "Kamera halkası"))
+        PrefChips(Prefs.ringStyle, listOf("new" to tr("New", "Yeni"), "old" to tr("Old", "Eski")))
         PrefChips(Prefs.buddyBubbleShape, listOf("pill" to tr("Pill", "Hap"), "soft" to tr("Soft", "Yumuşak"), "sharp" to tr("Sharp", "Köşeli")))
         Text(tr("Colour", "Renk"), style = MaterialTheme.typography.bodyLarge)
         PrefChips(Prefs.buddyBubbleTone, listOf("light" to tr("Light", "Açık"), "dark" to tr("Dark", "Koyu"), "orange" to tr("Orange", "Turuncu")))

@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
@@ -171,51 +172,55 @@ class KeepAliveService : Service() {
     private var fgWorking: Boolean? = null
     private var fgOutfit = ""
 
-    // The flipper animates inside the notification by itself, so the notification is not re-posted to "dance".
-    private fun view(text: String, working0: Boolean): android.widget.RemoteViews {
+    // A plain notification with the mascot as its large icon: a custom RemoteViews layout crashed the app on start
+    // (BadForegroundServiceNotificationException, "Couldn't inflate contentViews"), so no layout is inflated here.
+    private fun picture(): android.graphics.Bitmap {
         val pc = atComputer()
-        val working = working0 && !pc
-        val layout = if (pc) R.layout.notif_pc else if (working) R.layout.notif_dance else R.layout.notif_still
-        return android.widget.RemoteViews(packageName, layout).apply {
-            setTextViewText(R.id.ntitle, getString(R.string.notif_keep_title))
-            setTextViewText(R.id.ntext, text)
-            // the notification shade is white by day and dark by night: the text follows the system mode
-            val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-            val ink = if (night) android.graphics.Color.WHITE else android.graphics.Color.BLACK
-            setTextColor(R.id.ntitle, ink); setTextColor(R.id.ntext, ink)
-            val hat = Outfit.hat()
-            val ids = if (pc) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2) else if (working) listOf(R.id.m1 to R.id.h1, R.id.m2 to R.id.h2, R.id.m3 to R.id.h3, R.id.m4 to R.id.h4) else listOf(R.id.m1 to R.id.h1)
-            if (Prefs.showNotifMascot.value != "1") ids.forEach { (m, h) -> setViewVisibility(m, android.view.View.GONE); setViewVisibility(h, android.view.View.GONE) }
-            else {
-                // a notification only takes pictures: the face in its colour, the blanket when idle (asleep, like the pill and the header) and the hat fitted, in one
-                val asleep = layout == R.layout.notif_still && lastSt == Status.Idle && !Engine.buildRunning.value
-                val blanket = asleep && Prefs.buddyBlanket.value == "1"
-                ids.forEachIndexed { i, (m, h) ->
-                    val faces = if (pc) Mascots.pc(i == 1)
-                        else listOf(if (asleep) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18))
-                    setImageViewBitmap(m, Mascots.bitmap(this@KeepAliveService, faces, hat, blanket, if (pc) emptyList() else Wear.worn(asleep)))
-                    setViewVisibility(h, android.view.View.GONE)
-                }
+        val asleep = lastSt == Status.Idle && !Engine.buildRunning.value
+        val faces = if (pc) Mascots.pc(false)
+            else listOf(if (asleep) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18))
+        val blanket = asleep && Prefs.buddyBlanket.value == "1"
+        val bm = Mascots.bitmap(this, faces, Outfit.hat(), blanket, if (pc) emptyList() else Wear.worn(asleep))
+        if (!lastSt.running) return bm
+        val m = android.graphics.Matrix().apply { postRotate(Dance.ROT[frame % Dance.ROT.size], bm.width / 2f, bm.height / 2f) }
+        return android.graphics.Bitmap.createBitmap(bm, 0, 0, bm.width, bm.height, m, true)
+    }
+
+    private var frame = 0
+    private var danceJob: Job? = null
+
+    // while Claude works the large icon steps through the dance frames, re-posted in place under the same id
+    private fun danceLoop(working: Boolean) {
+        danceJob?.cancel(); danceJob = null
+        if (!working || Prefs.showNotifMascot.value != "1") return
+        danceJob = scope.launch {
+            while (true) {
+                delay(Dance.FRAME_MS)
+                frame++
+                NotificationManagerCompat.from(this@KeepAliveService).notify(1, note(fgText, fgWorking == true))
             }
         }
     }
+
+    private fun note(text: String, working: Boolean): android.app.Notification =
+        NotificationCompat.Builder(this, Notifier.CH_KEEP)
+            .setSmallIcon(Outfit.statIcon())
+            .setContentTitle(getString(R.string.notif_keep_title))
+            .setContentText(text)
+            .apply { if (Prefs.showNotifMascot.value == "1") setLargeIcon(picture()) }
+            .setPriority(NotificationCompat.PRIORITY_MIN).setVisibility(NotificationCompat.VISIBILITY_SECRET).setOngoing(true).setOnlyAlertOnce(true).setContentIntent(Notifier.open(this))
+            .addAction(0, getString(R.string.notif_stop),
+                PendingIntent.getService(this, 1, Intent(this, KeepAliveService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            .build()
 
     private fun startFg(text: String, working: Boolean = false) {
         val outfit = Prefs.pillOutfit.value + Prefs.showNotifMascot.value + atComputer() + (lastSt == Status.Idle) + Mascots.current() + Prefs.mascotSkin.value + Prefs.buddyBlanket.value
         if (text == fgText && fgWorking == working && fgOutfit == outfit) return // identical: do not re-post the notification
         fgText = text; fgWorking = working; fgOutfit = outfit
-        val n = NotificationCompat.Builder(this, Notifier.CH_KEEP)
-            .setSmallIcon(Outfit.statIcon())
-            .setContentTitle(getString(R.string.notif_keep_title))
-            .setContentText(text)
-            // no decorated style: the system does not wrap our layout in its own dark pill
-            .setCustomContentView(view(text, working))
-            .setPriority(NotificationCompat.PRIORITY_MIN).setVisibility(NotificationCompat.VISIBILITY_SECRET).setOngoing(true).setOnlyAlertOnce(true).setContentIntent(Notifier.open(this))
-            .addAction(0, getString(R.string.notif_stop),
-                PendingIntent.getService(this, 1, Intent(this, KeepAliveService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
-            .build()
+        val n = note(text, working)
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         else startForeground(1, n)
+        danceLoop(working)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

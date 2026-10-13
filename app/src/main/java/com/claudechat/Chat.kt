@@ -1,6 +1,9 @@
 package com.claudechat
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.text.format.DateFormat
 import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -53,9 +56,13 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -205,15 +212,15 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
     // the same colours as the pill: build colour while a build runs, done colour when done, blue for the shell
     val thinkingNow = st == Status.Working && !shell && det == appStr(R.string.thinking)
     // a build while Bash runs or while Claude thinks: the build colour and the other one blend
-    val second = if (shell) bashKey else thinkKey
+    val second = if (shell) StateColors.argb(bashKey, 0f, "blue") else StateColors.argb(thinkKey, 0f, "white")
     val accent = when {
-        building && (shell || thinkingNow) -> androidx.compose.ui.graphics.lerp(Color(StateColors.argb(buildKey)), Color(StateColors.argb(second)), toBlue)
-        building -> Color(StateColors.argb(buildKey, hue))
-        shell -> Color(StateColors.argb(bashKey, hue))
-        st == Status.Working && det == appStr(R.string.thinking) -> Color(StateColors.argb(thinkKey, hue))
+        building && (shell || thinkingNow) -> androidx.compose.ui.graphics.lerp(Color(StateColors.argb(buildKey, 0f, "pink")), Color(second), toBlue)
+        building -> Color(StateColors.argb(buildKey, hue, "pink"))
+        shell -> Color(StateColors.argb(bashKey, hue, "blue"))
+        st == Status.Working && det == appStr(R.string.thinking) -> Color(StateColors.argb(thinkKey, hue, "white"))
         // the main chat looks finished but its agents still work: blue, not "Done"
-        st == Status.Done && live > 0 -> Color(StateColors.argb(bashKey, hue))
-        st == Status.Done -> Color(StateColors.argb(doneKey, hue))
+        st == Status.Done && live > 0 -> Color(StateColors.argb(bashKey, hue, "blue"))
+        st == Status.Done -> Color(StateColors.argb(doneKey, hue, "green"))
         else -> statusColor(st)
     }
     Surface(color = MaterialTheme.colorScheme.background) {
@@ -229,7 +236,7 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
                     val tl = androidx.compose.ui.geometry.Offset(inset, inset)
                     drawArc(ringColor.copy(alpha = .25f), 0f, 360f, false, tl, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(w))
                     if (building && (shell || thinkingNow)) rotate(spin, center) { // a build with Bash or thinking: the ring turns through both colours
-                        drawArc(androidx.compose.ui.graphics.Brush.sweepGradient(listOf(Color(StateColors.argb(buildKey)), Color(StateColors.argb(second)), Color(StateColors.argb(buildKey))), center), 0f, 360f, false, tl, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(w))
+                        drawArc(androidx.compose.ui.graphics.Brush.sweepGradient(listOf(Color(StateColors.argb(buildKey, 0f, "pink")), Color(second), Color(StateColors.argb(buildKey, 0f, "pink"))), center), 0f, 360f, false, tl, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(w))
                     } else if (st.running || building) drawArc(ringColor, spin - 90f, 100f, false, tl, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(w, cap = androidx.compose.ui.graphics.StrokeCap.Round))
                     else drawArc(ringColor, 0f, 360f, false, tl, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(w))
                 }
@@ -249,7 +256,7 @@ private fun TopBar(title: String, st: Status, det: String, model: String, onMode
                     Box(Modifier.size(8.dp).clip(CircleShape).background(accent))
                     Spacer(Modifier.width(6.dp))
                     // thinking: the same empty thought bubble as in the pill
-                    if (st == Status.Working && !shell && det == appStr(R.string.thinking)) Icon(painterResource(R.drawable.ic_thought), null, Modifier.size(12.dp), tint = Color(StateColors.argb(thinkKey)))
+                    if (st == Status.Working && !shell && det == appStr(R.string.thinking)) Icon(painterResource(R.drawable.ic_thought), null, Modifier.size(12.dp), tint = Color(StateColors.argb(thinkKey, 0f, "white")))
                     Text((if (title.isNotEmpty()) modelTitle(model) + " · " else "") + (if (building) tr("Compiling", "Derleniyor") else if (st != Status.Working && live > 0) tr("$live agents working", "$live ajan çalışıyor") else statusText(st, det)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -573,18 +580,39 @@ private fun CopyBtn(text: String) {
     }
 }
 
+private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
+
 @Composable
 private fun AttChip(a: Att, onRemove: () -> Unit) {
     val ctx = LocalContext.current
+    val isImage = a.name.substringAfterLast('.', "").lowercase() in IMAGE_EXT
     val thumb by produceState<Bitmap?>(null, a.uri) {
-        // a plain file now (not a MediaStore item), so decode it directly; non-images give null and show the icon
-        value = withContext(Dispatchers.IO) { try { android.graphics.BitmapFactory.decodeFile(a.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 }) } catch (e: Exception) { null } }
+        // decoded off the main thread at a small size, read through the uri so MediaStore picks work too; null for non-images
+        value = if (!isImage) null else withContext(Dispatchers.IO) {
+            try { ctx.contentResolver.openInputStream(a.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 }) } } catch (e: Exception) { null }
+        }
     }
+    if (isImage) {
+        // a picture: a 56 dp rounded thumbnail with the file name under it and an x on the corner
+        Column(Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(56.dp)) {
+                val b = thumb
+                if (b != null) Image(b.asImageBitmap(), a.name, Modifier.matchParentSize().clip(RoundedCornerShape(12.dp)), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                else Box(Modifier.matchParentSize().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Image, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onRemove, Modifier.align(Alignment.TopEnd).size(24.dp).background(Color.Black.copy(alpha = .6f), CircleShape)) {
+                    Icon(Icons.Filled.Close, stringResource(R.string.remove), Modifier.size(14.dp), tint = Color.White)
+                }
+            }
+            Text(a.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+    // any other file keeps the compact chip
     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(Modifier.padding(start = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            val b = thumb
-            if (b != null) Image(b.asImageBitmap(), null, Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-            else Icon(Icons.Filled.InsertDriveFile, null, Modifier.size(40.dp).padding(6.dp))
+            Icon(Icons.Filled.InsertDriveFile, null, Modifier.size(40.dp).padding(6.dp))
             Spacer(Modifier.width(8.dp))
             Text(a.name, Modifier.widthIn(max = 140.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
             IconButton(onRemove, Modifier.size(32.dp)) { Icon(Icons.Filled.Close, stringResource(R.string.remove), Modifier.size(16.dp)) }
@@ -633,16 +661,17 @@ private fun Composer(value: String, onChange: (String) -> Unit, working: Boolean
     val cs = MaterialTheme.colorScheme
     Surface(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), shape = RoundedCornerShape(28.dp), color = cs.surfaceContainerLow,
         border = androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant), shadowElevation = 2.dp) {
-        Column(Modifier.padding(start = 6.dp, end = 8.dp, top = 4.dp, bottom = 6.dp)) {
+        // the buttons float over the bottom of the box, so they stay put however many lines the text has
+        Box(Modifier.padding(start = 6.dp, end = 8.dp, top = 4.dp, bottom = 6.dp)) {
             TextField(
-                value, onChange, Modifier.fillMaxWidth(),
+                value, onChange, Modifier.fillMaxWidth().padding(bottom = 44.dp),
                 placeholder = { Text(stringResource(R.string.hint_message), color = cs.onSurfaceVariant) }, maxLines = 6,
                 colors = TextFieldDefaults.colors(
                     focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent,
                     focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
                 ),
             )
-            Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 4.dp).zIndex(1f), verticalAlignment = Alignment.CenterVertically) {
                 // the plus opens two choices: photos from the gallery, or any file
                 var menu by remember { mutableStateOf(false) }
                 Box {
@@ -679,7 +708,8 @@ private fun Composer(value: String, onChange: (String) -> Unit, working: Boolean
 fun MarkdownText(text: String, color: Color, serif: Boolean = false) {
     val cs = MaterialTheme.colorScheme
     val clip = LocalClipboardManager.current
-    val parts = remember(text) { splitFences(text) }
+    // an SVG written as plain text (not in a code fence) gets the same picture / code switch
+    val parts = remember(text) { splitFences(text).flatMap { (code, body) -> if (code) listOf(code to body) else splitRawSvg(body) } }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         parts.forEach { (isCode, body) ->
             if (isCode) {
@@ -702,10 +732,22 @@ fun MarkdownText(text: String, color: Color, serif: Boolean = false) {
                     }
                 }
             } else if (body.isNotBlank()) {
-                Text(inline(body.trim('\n'), color, cs.surfaceContainerHigh), color = color, fontSize = if (serif) 16.5.sp else 15.5.sp, lineHeight = if (serif) 25.sp else 21.sp, fontFamily = if (serif) FontFamily.Serif else FontFamily.Default)
+                Text(inline(body.trim('\n'), color, cs.surfaceContainerHigh, cs.primary, LocalContext.current), color = color, fontSize = if (serif) 16.5.sp else 15.5.sp, lineHeight = if (serif) 25.sp else 21.sp, fontFamily = if (serif) FontFamily.Serif else FontFamily.Default)
             }
         }
     }
+}
+
+private fun splitRawSvg(s: String): List<Pair<Boolean, String>> {
+    val out = ArrayList<Pair<Boolean, String>>()
+    var pos = 0
+    for (m in Regex("<svg[\\s\\S]*?</svg>").findAll(s)) {
+        if (m.range.first > pos) out.add(false to s.substring(pos, m.range.first))
+        out.add(true to m.value)
+        pos = m.range.last + 1
+    }
+    if (pos < s.length || out.isEmpty()) out.add(false to s.substring(pos))
+    return out
 }
 
 private fun splitFences(s: String): List<Pair<Boolean, String>> {
@@ -722,9 +764,9 @@ private fun splitFences(s: String): List<Pair<Boolean, String>> {
     return out
 }
 
-private val inlineRe = Regex("\\*\\*(.+?)\\*\\*|`([^`]+)`")
+private val inlineRe = Regex("\\*\\*(.+?)\\*\\*|`([^`]+)`|(https?://[^\\s<>\"()\\[\\]]*[^\\s<>\"()\\[\\].,;:!?'])")
 
-private fun inline(s: String, fg: Color, codeBg: Color): AnnotatedString = buildAnnotatedString {
+private fun inline(s: String, fg: Color, codeBg: Color, linkColor: Color, ctx: Context): AnnotatedString = buildAnnotatedString {
     s.lines().forEachIndexed { i, raw ->
         if (i > 0) append('\n')
         var line = raw
@@ -737,7 +779,10 @@ private fun inline(s: String, fg: Color, codeBg: Color): AnnotatedString = build
             for (m in inlineRe.findAll(line)) {
                 append(line.substring(pos, m.range.first))
                 if (m.groupValues[1].isNotEmpty()) withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(m.groupValues[1]) }
-                else withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg, fontSize = 14.sp)) { append(m.groupValues[2]) }
+                else if (m.groupValues[3].isNotEmpty()) {
+                    val url = m.groupValues[3]
+                    withLink(LinkAnnotation.Url(url, TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)), linkInteractionListener = { openInBrowser(ctx, url) })) { append(url) }
+                } else withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg, fontSize = 14.sp)) { append(m.groupValues[2]) }
                 pos = m.range.last + 1
             }
             append(line.substring(pos))
@@ -745,6 +790,9 @@ private fun inline(s: String, fg: Color, codeBg: Color): AnnotatedString = build
     }
 }
 
+private fun openInBrowser(ctx: Context, url: String) {
+    try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { }
+}
 
 // ---- tool groups (small, expandable), palette, options ----
 

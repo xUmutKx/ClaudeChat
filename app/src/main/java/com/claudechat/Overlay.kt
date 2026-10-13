@@ -424,11 +424,11 @@ class Overlay(base: Context) {
     private fun applyStateColor(st: Status, shell: Boolean, thinking: Boolean) {
         // build together with Bash or with thinking: the ring and the outline turn through the build colour and the other one
         val both = buildOn && (shell || thinking)
-        val second = if (shell) Prefs.bashColor.value else Prefs.thinkColor.value
+        val second = if (shell) StateColors.argb(Prefs.bashColor.value, 0f, "blue") else StateColors.argb(Prefs.thinkColor.value, 0f, "white")
         val key = when { buildOn -> Prefs.buildColor.value; shell -> Prefs.bashColor.value; thinking -> Prefs.thinkColor.value; st == Status.Done -> Prefs.doneColor.value; else -> "" }
-        ring?.setPair(if (both) StateColors.argb(Prefs.buildColor.value) else null, if (both) StateColors.argb(second) else null)
+        ring?.setPair(if (both) StateColors.argb(Prefs.buildColor.value, 0f, "pink") else null, if (both) second else null)
         // the pill's outline turns through the same two colours as the ring
-        val pr = if (both) intArrayOf(StateColors.argb(Prefs.buildColor.value), StateColors.argb(second), StateColors.argb(Prefs.buildColor.value)) else null
+        val pr = if (both) intArrayOf(StateColors.argb(Prefs.buildColor.value, 0f, "pink"), second, StateColors.argb(Prefs.buildColor.value, 0f, "pink")) else null
         capsule?.pair = pr
         if (both && pairAnim == null) pairAnim = ValueAnimator.ofFloat(0f, 360f).apply {
             duration = 2400; repeatCount = ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
@@ -440,12 +440,12 @@ class Overlay(base: Context) {
             glide?.cancel(); glide = null
             if (cycle == null) cycle = ValueAnimator.ofFloat(0f, 360f).apply {
                 duration = 4000; repeatCount = ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
-                addUpdateListener { applyColor(StateColors.argb("rainbow", it.animatedValue as Float)) }
+                addUpdateListener { applyColor(StateColors.argb("rainbow", it.animatedValue as Float, "pink")) }
                 start()
             }
             return
         }
-        glideTo(when { buildOn -> StateColors.argb(Prefs.buildColor.value); shell -> StateColors.argb(Prefs.bashColor.value); thinking -> StateColors.argb(Prefs.thinkColor.value); st == Status.Done -> StateColors.argb(Prefs.doneColor.value); else -> color(st) })
+        glideTo(when { buildOn -> StateColors.argb(Prefs.buildColor.value, 0f, "pink"); shell -> StateColors.argb(Prefs.bashColor.value, 0f, "blue"); thinking -> StateColors.argb(Prefs.thinkColor.value, 0f, "white"); st == Status.Done -> StateColors.argb(Prefs.doneColor.value, 0f, "green"); else -> color(st) })
     }
 
     /** Pink pixels leave the mascot's side and fade out inside the pill (no extra view, so the pill does not grow). */
@@ -458,7 +458,7 @@ class Overlay(base: Context) {
         val px = 3 * d
         val rnd = java.util.Random()
         repeat(8) { i ->
-            val dot = android.graphics.drawable.ColorDrawable(StateColors.argb(Prefs.buildColor.value))
+            val dot = android.graphics.drawable.ColorDrawable(StateColors.argb(Prefs.buildColor.value, 0f, "pink"))
             ov.add(dot)
             val ang = rnd.nextFloat() * 6.2831f
             val dist = (6 + rnd.nextInt(6)) * d
@@ -681,8 +681,12 @@ class Overlay(base: Context) {
             val d = resources.displayMetrics.density
             if (!shown) return
             p.strokeWidth = 1.2f * d
-            val r = minOf(width, height) / 2f - p.strokeWidth - 1f // 1px off the radius = 2px smaller diameter
-            val box = RectF(width / 2f - r, height / 2f - r, width / 2f + r, height / 2f + r)
+            val r0 = minOf(width, height) / 2f - p.strokeWidth - 1f // 1px off the radius = 2px smaller diameter
+            // the new ring: 1 px smaller in radius (was 3, too tight) and cut 6 px at the top, so it sits round the camera (like the face-scan ring)
+            val newRing = Prefs.ringStyle.value != "old"
+            val r = if (newRing) r0 - 1 * d else r0
+            val top = height / 2f - r + (if (newRing) 6 * d else 0f)
+            val box = RectF(width / 2f - r, top, width / 2f + r, height / 2f + r)
             val pr = pair
             if (pr != null) {
                 val m = android.graphics.Matrix().apply { setRotate(spin, width / 2f, height / 2f) }
@@ -1113,4 +1117,4 @@ fun clockFont(ctx: Context, key: String): android.graphics.Typeface {
 }
 
 /** The pill's glow colour for a choice in Customize (0 = no glow). */
-fun glowArgb(k: String): Int = when (k) { "cyan" -> 0xFF3CF0FF.toInt(); "pink" -> 0xFFFF4D9D.toInt(); "gold" -> 0xFFFFC107.toInt(); "green" -> 0xFF5DE08A.toInt(); else -> 0 }
+fun glowArgb(k: String): Int = when (k) { "cyan" -> 0xFF3CF0FF.toInt(); "pink" -> 0xFFFF4D9D.toInt(); "gold" -> 0xFFFFC107.toInt(); "green" -> 0xFF5DE08A.toInt(); else -> if (StateColors.isHex(k)) android.graphics.Color.parseColor(k) else 0 }

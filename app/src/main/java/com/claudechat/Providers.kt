@@ -39,6 +39,7 @@ object Providers {
             listOf("mistral-small-latest", "mistral-large-latest")),
         P("openai", "ChatGPT", "https://api.openai.com/v1", "gpt-4o-mini", "Paid API key", "Ücretli API anahtarı", "gray", "https://platform.openai.com/api-keys", true, "owl",
             listOf("gpt-4o-mini", "gpt-4o")),
+        P("atomic", "Atomic Agent (this phone)", "http://127.0.0.1:8787/v1", "atomic-agent", "Local agent started in Termux: no internet needed for the model once it is set up", "Termux'ta çalışan yerel ajan: kurulduktan sonra model için internet gerekmez", "teal", "", true, "bolt"),
         P("custom", "Custom", "", "", "Any OpenAI-compatible server (set address and model)", "OpenAI uyumlu herhangi bir sunucu (adres ve model gir)", "yellow", "", false, "ghost"),
     )
 

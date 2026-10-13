@@ -19,7 +19,7 @@ import org.json.JSONObject
 object Wear {
     val FEET = listOf("none", "sneakers", "hightops", "boots", "socks", "sandals", "clogs", "slippers")
     val LEGS = listOf("none", "jeans", "shorts", "cargo", "overalls", "stripes", "leggings")
-    val BODY = listOf("none", "cape", "scarf", "belt", "bowtie")
+    val BODY = listOf("none", "cape", "scarf", "belt", "bowtie", "vest", "hoodie")
     val FACE = listOf("none", "glasses", "nerd", "sunglasses", "monocle", "eyepatch", "party", "mustache", "handlebar", "curly", "goatee", "beard")
     val EYES = listOf("dark", "blue", "green", "purple", "red", "gold")
 

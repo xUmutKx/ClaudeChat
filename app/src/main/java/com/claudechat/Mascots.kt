@@ -28,7 +28,7 @@ object Mascots {
 
     private fun skins() = try { JSONObject(Prefs.mascotSkins.value) } catch (e: Exception) { JSONObject() }
 
-    fun skinOf(c: String): String = skins().optString(c).takeIf { it in Outfit.SKINS } ?: DEFAULT_SKIN[c] ?: "orange"
+    fun skinOf(c: String): String = skins().optString(c).takeIf { it in Outfit.SKINS || StateColors.isHex(it) } ?: DEFAULT_SKIN[c] ?: "orange"
 
     /** [Prefs.mascotSkin] is the colour of whoever is on screen now; everything that draws the mascot reads that one. */
     fun syncSkin() { val s = skinOf(current()); if (Prefs.mascotSkin.value != s) Prefs.mascotSkin.value = s }
