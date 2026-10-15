@@ -26,12 +26,15 @@ object Providers {
             listOf("DeepSeek-V4-Flash-0731", "gpt-oss:20b", "gemma4:31b", "glm-5.2", "GLM-5.3-Flash", "minimax-m2.7", "mistral-Nemo-Instruct-2407", "nemotron-3-nano:30b", "codestral-latest")),
         P("github", "GitHub Models", "https://models.github.ai/inference", "openai/gpt-4.1-mini", "Free with your GitHub login: nothing to copy", "GitHub girişinle ücretsiz: kopyalanacak bir şey yok", "gray", "", false, "cat",
             listOf("openai/gpt-4.1-mini", "openai/gpt-4.1", "openai/gpt-4o-mini", "meta/llama-3.3-70b-instruct", "deepseek/deepseek-r1", "microsoft/phi-4", "mistral-ai/mistral-small-2503", "xai/grok-3-mini"), "gh"),
-        P("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat", "Paid API key (very cheap)", "Ücretli API anahtarı (çok ucuz)", "blue", "https://platform.deepseek.com/api_keys", true, "whale",
-            listOf("deepseek-chat", "deepseek-reasoner")),
+        // names from api-docs.deepseek.com (2026-10): deepseek-flash = V4.1 Flash, deepseek-v4-pro; the old deepseek-chat/-reasoner aliases were due to retire 2026-07-24
+        P("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-flash", "Paid API key (very cheap, with prompt caching)", "Ücretli API anahtarı (çok ucuz, önbellekli)", "blue", "https://platform.deepseek.com/api_keys", true, "whale",
+            listOf("deepseek-flash", "deepseek-v4-pro")),
         P("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.5-flash", "Free key from Google AI Studio", "Google AI Studio'dan ücretsiz anahtar", "purple", "https://aistudio.google.com/apikey", true, "star",
             listOf("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite")),
-        P("ollama", "Ollama (local)", "http://127.0.0.1:11434/v1", "llama3.2:3b", "Models that run on your own phone or computer: no key, no internet once downloaded", "Kendi telefonunda ya da bilgisayarında çalışan modeller: anahtar yok, indirdikten sonra internet yok", "gray", "", false, "llama",
-            listOf("llama3.2:3b", "qwen2.5:3b", "gemma3:4b", "deepseek-r1:1.5b", "phi3:mini")),
+        P("ollama", "Ollama (local)", "http://127.0.0.1:11434/v1", "qwen2.5:1.5b", "Models that run on your own phone or computer: no key, no internet once downloaded", "Kendi telefonunda ya da bilgisayarında çalışan modeller: anahtar yok, indirdikten sonra internet yok", "gray", "", false, "llama",
+            LocalModels.all.map { it.tag }),
+        P("grok", "Grok (xAI)", "https://api.x.ai/v1", "grok-4", "Paid API key from xAI", "xAI'dan ücretli API anahtarı", "gray", "https://console.x.ai/", true, "bolt",
+            listOf("grok-4", "grok-3-mini")),
         P("groq", "Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "Free key, very fast", "Ücretsiz anahtar, çok hızlı", "teal", "https://console.groq.com/keys", true, "bolt",
             listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant")),
         P("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "deepseek/deepseek-chat-v3-0324:free", "Many models, some free (':free')", "Çok model, bazıları ücretsiz (':free')", "green", "https://openrouter.ai/keys", true, "rabbit"),
@@ -39,9 +42,10 @@ object Providers {
             listOf("mistral-small-latest", "mistral-large-latest")),
         P("openai", "ChatGPT", "https://api.openai.com/v1", "gpt-4o-mini", "Paid API key", "Ücretli API anahtarı", "gray", "https://platform.openai.com/api-keys", true, "owl",
             listOf("gpt-4o-mini", "gpt-4o")),
-        P("atomic", "Atomic Agent (this phone)", "http://127.0.0.1:8787/v1", "atomic-agent", "Local agent started in Termux: no internet needed for the model once it is set up", "Termux'ta çalışan yerel ajan: kurulduktan sonra model için internet gerekmez", "teal", "", true, "bolt"),
+        P("atomic", "Atomic Agent (this phone)", "http://127.0.0.1:8790/v1", "atomic-agent", "Local agent inside the built-in Linux: no internet needed for the model once it is set up", "Yerleşik Linux'ta çalışan yerel ajan: kurulduktan sonra model için internet gerekmez", "teal", "", true, "bolt"),
         P("custom", "Custom", "", "", "Any OpenAI-compatible server (set address and model)", "OpenAI uyumlu herhangi bir sunucu (adres ve model gir)", "yellow", "", false, "ghost"),
-    )
+    // the DeepSeek build keeps "Custom" too: any OpenAI-compatible address + key + model (a friend's or own server)
+    ).let { l -> if (App.dsOnly) l.filter { it.id == "deepseek" || it.id == "custom" } else l }
 
     fun byId(id: String) = all.firstOrNull { it.id == id } ?: all[0]
     fun current() = byId(Prefs.provider.value)
@@ -49,7 +53,7 @@ object Providers {
     private fun cfg() = try { JSONObject(Prefs.provCfg.value) } catch (e: Exception) { JSONObject() }
     fun field(id: String, k: String, def: String = "") = cfg().optJSONObject(id)?.optString(k, def)?.takeIf { it.isNotEmpty() } ?: def
     fun key(id: String) = field(id, "key")
-    fun model(p: P) = field(p.id, "model", p.model)
+    fun model(p: P) = field(p.id, "model", p.model).let { if (p.id == "deepseek" && (it == "deepseek-chat" || it == "deepseek-reasoner")) "deepseek-flash" else it }
     fun base(p: P) = field(p.id, "base", p.base).trimEnd('/')
     fun set(id: String, k: String, v: String) {
         val c = cfg(); val o = c.optJSONObject(id) ?: JSONObject()
@@ -68,7 +72,30 @@ object Providers {
         "shape-rendering=\"crispEdges\" and one rect per coloured pixel run. Keep the text around it to one or two short sentences."
 
     class ToolCall(val id: String, val name: String, val args: String)
-    class Turn(val text: String, val calls: List<ToolCall>)
+    class Usage(val prompt: Int, val hit: Int, val miss: Int, val out: Int)
+    class Turn(val text: String, val calls: List<ToolCall>, val usage: Usage? = null)
+
+    /** DeepSeek price in USD for one answer (api-docs.deepseek.com, per 1M tokens; half price off-peak, peak = Mon-Fri 01-04 and 06-10 UTC; holidays ignored). */
+    fun deepseekCost(model: String, u: Usage): Double {
+        val c = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+        val wd = c.get(java.util.Calendar.DAY_OF_WEEK); val h = c.get(java.util.Calendar.HOUR_OF_DAY)
+        val peak = wd != java.util.Calendar.SATURDAY && wd != java.util.Calendar.SUNDAY && (h in 1..3 || h in 6..9)
+        val pro = model.contains("pro")
+        val k = if (peak) 2.0 else 1.0
+        val hit = (if (pro) 0.022 else 0.003) * k; val miss = (if (pro) 0.66 else 0.15) * k; val out = (if (pro) 1.98 else 0.60) * k
+        val m = if (u.hit + u.miss > 0) u.miss else u.prompt
+        return (u.hit * hit + m * miss + u.out * out) / 1_000_000.0
+    }
+
+    private fun friendly(p: P, code: Int, msg: String): String = if (p.id != "deepseek") "${p.name} $code: $msg" else "DeepSeek $code: " + when (code) {
+        401 -> "the API key is wrong (Settings > AI)."
+        402 -> "no balance left. Top up at platform.deepseek.com."
+        429 -> "rate limit reached, wait a moment and send again."
+        503 -> "the server is overloaded, try again in a minute."
+        500 -> "DeepSeek server error, try again."
+        400, 422 -> "request refused: $msg"
+        else -> msg
+    }
 
     /** One model turn, streamed. [msgs] is the whole conversation in OpenAI format; with [tools] the model may answer with tool calls instead of (or after) text. */
     fun completion(p: P, msgs: JSONArray, tools: JSONArray?, client: OkHttpClient, onCall: (Call) -> Unit, onDelta: (String) -> Unit): Turn {
@@ -82,20 +109,33 @@ object Providers {
         if (model.isEmpty()) throw IOException("No model name for ${p.name}. Add it in Settings > AI.")
         val body = JSONObject().put("model", model).put("stream", true).put("messages", msgs)
         if (tools != null && tools.length() > 0) body.put("tools", tools)
+        if (p.id == "deepseek") {
+            body.put("stream_options", JSONObject().put("include_usage", true))
+            // thinking mode needs every earlier reasoning_content sent back when tools are on; the chat history keeps text only, so tool runs go non-thinking
+            if (tools != null && tools.length() > 0) body.put("thinking", JSONObject().put("type", "disabled"))
+        }
         val rb = Request.Builder().url("$base/chat/completions").post(body.toString().toRequestBody("application/json".toMediaType()))
         if (k.isNotEmpty()) rb.header("Authorization", "Bearer $k")
         if (p.auth == "gh") { rb.header("Accept", "application/vnd.github+json"); rb.header("X-GitHub-Api-Version", "2022-11-28") }
-        val call = client.newCall(rb.build())
-        onCall(call)
+        val req = rb.build()
         val text = StringBuilder()
         val ids = HashMap<Int, String>(); val names = HashMap<Int, String>(); val args = HashMap<Int, StringBuilder>()
-        call.execute().use { resp ->
+        var usage: Usage? = null
+        // 429/500/503 come before any streaming: wait and ask again (2s, 4s, 8s)
+        var call = client.newCall(req); onCall(call)
+        var first = call.execute()
+        var tries = 0
+        while (!first.isSuccessful && first.code in listOf(429, 500, 503) && tries < 3 && !call.isCanceled()) {
+            first.close(); Thread.sleep(2000L shl tries); tries++
+            call = client.newCall(req); onCall(call); first = call.execute()
+        }
+        first.use { resp ->
             if (!resp.isSuccessful) {
                 val raw = resp.body?.string().orEmpty()
                 val msg = try { JSONObject(raw).optJSONObject("error")?.optString("message").orEmpty().ifEmpty { raw.take(200) } } catch (e: Exception) {
                     try { JSONArray(raw).optJSONObject(0)?.optJSONObject("error")?.optString("message").orEmpty().ifEmpty { raw.take(200) } } catch (e2: Exception) { raw.take(200) }
                 }
-                throw IOException("${p.name} ${resp.code}: $msg")
+                throw IOException(friendly(p, resp.code, msg))
             }
             val src = resp.body!!.source()
             while (true) {
@@ -104,7 +144,12 @@ object Providers {
                 val d = line.removePrefix("data:").trim()
                 if (d == "[DONE]") break
                 try {
-                    val delta = JSONObject(d).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: continue
+                    val j = JSONObject(d)
+                    j.optJSONObject("usage")?.let { u ->
+                        val hit = u.optInt("prompt_cache_hit_tokens", u.optJSONObject("prompt_tokens_details")?.optInt("cached_tokens") ?: 0)
+                        usage = Usage(u.optInt("prompt_tokens"), hit, u.optInt("prompt_cache_miss_tokens", (u.optInt("prompt_tokens") - hit).coerceAtLeast(0)), u.optInt("completion_tokens"))
+                    }
+                    val delta = j.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: continue
                     val t = delta.optString("content")
                     if (t.isNotEmpty() && t != "null") { text.append(t); onDelta(t) }
                     val tc = delta.optJSONArray("tool_calls")
@@ -119,7 +164,7 @@ object Providers {
             }
         }
         val calls = names.keys.sorted().map { ToolCall(ids[it] ?: ("call_" + it), names[it]!!, args[it]?.toString().orEmpty()) }
-        return Turn(text.toString(), calls)
+        return Turn(text.toString(), calls, usage)
     }
 
     // ---- Ollama: list what is installed and download more ------------------------------------------------
@@ -137,7 +182,7 @@ object Providers {
 
     /** Downloads a model; [onStatus] gets lines like "pulling 4f2a… 37%". Returns an error text or null on success. */
     fun ollamaPull(client: OkHttpClient, name: String, onStatus: (String) -> Unit): String? = try {
-        val body = JSONObject().put("name", name).put("stream", true).toString().toRequestBody("application/json".toMediaType())
+        val body = JSONObject().put("model", name).put("name", name).put("stream", true).toString().toRequestBody("application/json".toMediaType())
         client.newCall(Request.Builder().url(ollamaRoot() + "/api/pull").post(body).build()).execute().use { r ->
             if (!r.isSuccessful) return "Ollama ${r.code}: ${r.body?.string().orEmpty().take(160)}"
             val src = r.body!!.source()

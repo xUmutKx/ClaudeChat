@@ -416,7 +416,8 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
             Label(tr("Body colour", "Gövde rengi"))
             val defSkin = Mascots.DEFAULT_SKIN[Mascots.current()] ?: "orange"
             ColourRow(Color(Outfit.SKIN_SWATCH[defSkin] ?: 0xFFD97757), skin == defSkin, if (skin == defSkin) null else skinColor(skin),
-                { Mascots.setSkin(Mascots.current(), defSkin) }, { Mascots.setSkin(Mascots.current(), StateColors.hex(it.toArgb())) })
+                { Mascots.setSkin(Mascots.current(), defSkin) }, { Mascots.setSkin(Mascots.current(), StateColors.hex(it.toArgb())) },
+                onRainbow = { Mascots.setSkin(Mascots.current(), "rainbow") }, rainbow = skin == "rainbow")
             // the glow: the dark swatch switches it off, the bar picks any colour
             val glow by Prefs.pillGlow.flow.collectAsState()
             Label(tr("Glow behind the mascot", "Maskotun arkasındaki ışık"))

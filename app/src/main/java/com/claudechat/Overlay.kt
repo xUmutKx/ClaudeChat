@@ -102,6 +102,8 @@ class Overlay(base: Context) {
     private var idleNow = false                   // asleep with no build: the pill hides and shows no mark
     private var cycle: ValueAnimator? = null       // a colour cycle: "rainbow" through the hues, "both" between build colour and blue
     private var cycleKey = ""
+    private var bodyHue = 0f                      // rainbow body colour: the hue the body is drawn in now
+    private var bodyHueAnim: ValueAnimator? = null
     private var pairAnim: ValueAnimator? = null   // turns the pill's outline while two colours show
     private var pcAnim: ValueAnimator? = null     // laptop frames: typing arms, pulsing green light
     private var zAnim: ObjectAnimator? = null      // the drifting "z" of the sleeping pill
@@ -197,7 +199,7 @@ class Overlay(base: Context) {
 
     private fun mascotDrawableBase(sleep: Boolean, computer: Boolean = false, alt: Boolean = false): android.graphics.drawable.Drawable {
         val hat = Outfit.hat()
-        val skin = Outfit.skinMatrix()
+        val skin = if (sleep) null else Outfit.skinMatrix(hue = bodyHue)   // asleep the body stays the default orange
         fun d(id: Int) = androidx.core.content.ContextCompat.getDrawable(ctx, id)!!.mutate().also { if (skin != null) it.colorFilter = android.graphics.ColorMatrixColorFilter(skin) }
         fun h(id: Int) = Mascots.hat(ctx, id)   // moved and scaled to sit on this character's head
         if (computer) {
@@ -212,14 +214,34 @@ class Overlay(base: Context) {
         }
         val blanket = sleep && Prefs.buddyBlanket.value == "1"   // asleep under its blanket, like the buddy
         val worn = Wear.worn(sleep)
-        if (hat == 0 && !blanket && worn.isEmpty()) return d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep_navy) else Mascots.r(R.drawable.ic_mascot))
+        if (hat == 0 && !blanket && worn.isEmpty()) return d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep) else Mascots.r(R.drawable.ic_mascot))
         // outfit and blanket drawables share a taller 20x18 canvas so the hat fits above the head
         val layers = ArrayList<android.graphics.drawable.Drawable>()
-        layers.add(d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep_navy18) else Mascots.r(R.drawable.ic_mascot18)))
+        layers.add(d(if (sleep) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18)))
         worn.forEach { layers.add(androidx.core.content.ContextCompat.getDrawable(ctx, it)!!.mutate()) }
         if (blanket) layers.add(androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_blanket)!!.mutate())
         if (hat != 0) layers.add(h(hat))
         return android.graphics.drawable.LayerDrawable(layers.toTypedArray())
+    }
+
+    /** Rainbow body colour: the pill's body turns through the hues. Only the body layer is recoloured (hat and clothes keep theirs). */
+    private fun syncBodyRainbow() {
+        if (Prefs.mascotSkin.value != "rainbow") { bodyHueAnim?.cancel(); bodyHueAnim = null; bodyHue = 0f; return }
+        if (bodyHueAnim != null) return
+        var last = -99f
+        bodyHueAnim = ValueAnimator.ofFloat(0f, 360f).apply {
+            duration = 6000; repeatCount = ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
+            addUpdateListener {
+                val h = it.animatedValue as Float
+                if (Math.abs(h - last) < 8f) return@addUpdateListener   // a redraw every few degrees is plenty
+                last = h; bodyHue = h
+                val dr = mascot?.drawable ?: return@addUpdateListener
+                val body = if (dr is android.graphics.drawable.LayerDrawable) dr.getDrawable(0) else dr
+                Outfit.skinMatrix("rainbow", h)?.let { body?.colorFilter = android.graphics.ColorMatrixColorFilter(it) }
+                mascot?.invalidate()
+            }
+            start()
+        }
     }
 
     private fun color(st: Status) = when (st) {
@@ -248,6 +270,7 @@ class Overlay(base: Context) {
     }
 
     fun render(styleIn: String, st: Status, det: String, last: String) {
+        syncBodyRainbow()
         val black = styleIn.endsWith("+black")
         val style = styleIn.removeSuffix("+black")
         lastStyleIn = styleIn; cache = Triple(st, det, last)
@@ -1102,6 +1125,7 @@ class Overlay(base: Context) {
         blackLayer?.let { try { wm.removeView(it) } catch (e: Exception) { } }; blackLayer = null
         bStatus = null; bDet = null; bLast = null; bBatt = null; bMascot = null; bBob = null
         evAnim?.cancel(); evAnim = null; evHold?.let { main.removeCallbacks(it) }; evHold = null; glide?.cancel(); glide = null; cycle?.cancel(); cycle = null; cycleKey = ""; pairAnim?.cancel(); pairAnim = null; curColor = 0
+        bodyHueAnim?.cancel(); bodyHueAnim = null
         capsule = null; iconBox = null; evProg = 1f; evTarget = -1
         root = null; style = ""; pillRect = null
         mascot = null; spinner = null; mark = null; thought = null; label = null; sub = null; bar = null; pulse = null; bob = null; eyes = null; ring = null

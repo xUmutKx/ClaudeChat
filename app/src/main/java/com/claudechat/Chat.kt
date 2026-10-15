@@ -289,12 +289,17 @@ object Dance {
 }
 
 /** Mascot picture with the chosen outfit's hat on top (same pixel canvas as the pill's). */
+/** The body hue of the rainbow body colour: 0..360 and back to 0 every 6 s. */
+@Composable
+private fun rainbowHue(): Float = rememberInfiniteTransition(label = "bodyRainbow").animateFloat(0f, 360f, infiniteRepeatable(tween(6000, easing = LinearEasing)), label = "bodyHue").value
+
 @Composable
 private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean = false, error: Boolean = false, asleep: Boolean = false) {
     val hat = Outfit.hat(Prefs.pillOutfit.flow.collectAsState().value)
     val skin = Prefs.mascotSkin.flow.collectAsState().value
     Prefs.mascotChar.flow.collectAsState().value; Prefs.provider.flow.collectAsState().value // follow the character
-    val tint = remember(skin) { Outfit.skinMatrix(skin)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
+    val hue = if (skin == "rainbow") rainbowHue() else 0f
+    val tint = remember(skin, hue.toInt()) { Outfit.skinMatrix(skin, hue)?.let { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(it)) } }
     val wFeet by Prefs.wearFeet.flow.collectAsState(); val wLegs by Prefs.wearLegs.flow.collectAsState(); val wBody by Prefs.wearBody.flow.collectAsState()
     val wFace by Prefs.wearFace.flow.collectAsState(); val wEyes by Prefs.eyeColor.flow.collectAsState()
     val wear = Wear.layers(wFeet, wLegs, wBody, wFace, wEyes)
@@ -316,14 +321,14 @@ private fun MascotImg(sleeping: Boolean, modifier: Modifier, computer: Boolean =
         return
     }
     val blanketOn = sleeping && Prefs.buddyBlanket.flow.collectAsState().value == "1"
-    // asleep the body is navy; a blink (closed eyes, not asleep) keeps the orange one
-    if (hat == 0 && !blanketOn && wear.isEmpty()) { Image(painterResource(if (sleeping) Mascots.r(if (asleep) R.drawable.ic_mascot_sleep_navy else R.drawable.ic_mascot_sleep) else Mascots.r(R.drawable.ic_mascot)), null, modifier, colorFilter = tint); return }
+    // asleep: closed eyes in the body's own colour (the body keeps its chosen colour, also while it sleeps)
+    if (hat == 0 && !blanketOn && wear.isEmpty()) { Image(painterResource(if (sleeping) Mascots.r(R.drawable.ic_mascot_sleep) else Mascots.r(R.drawable.ic_mascot)), null, modifier, colorFilter = if (sleeping) null else tint); return }
     // falling asleep: the blanket is pulled up over the body
     var pulled by remember { mutableStateOf(false) }
     LaunchedEffect(sleeping) { pulled = false; if (sleeping) { kotlinx.coroutines.delay(60); pulled = true } }
     val pull by animateFloatAsState(if (pulled) 1f else 0f, tween(900), label = "blanket")
     Box(modifier) {
-        Image(painterResource(if (sleeping) Mascots.r(if (asleep) R.drawable.ic_mascot_sleep_navy18 else R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18)), null, Modifier.fillMaxSize(), colorFilter = tint)
+        Image(painterResource(if (sleeping) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18)), null, Modifier.fillMaxSize(), colorFilter = if (sleeping) null else tint)
         wear.forEach { Image(painterResource(it), null, Modifier.fillMaxSize()) }
         if (blanketOn) Image(painterResource(R.drawable.ic_blanket), null, Modifier.fillMaxSize().graphicsLayer { translationY = (1f - pull) * size.height * 0.45f; alpha = pull })
         if (hat != 0) Image(painterResource(hat), null, Modifier.fillMaxSize().hatFit())
@@ -421,11 +426,15 @@ fun Mascot(working: Boolean, modifier: Modifier, sleeping: Boolean = false, comp
         val t = rememberInfiniteTransition(label = "zzz")
         val a by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "z")
         val a2 by t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(1400, delayMillis = 700), RepeatMode.Reverse), label = "z2")
+        val a3 by t.animateFloat(0.2f, 1f, infiniteRepeatable(tween(1100, delayMillis = 300), RepeatMode.Reverse), label = "star")
         Box(contentAlignment = Alignment.TopEnd) {
             MascotImg(true, modifier, asleep = true)
             // two z's, the second one bigger and half a beat later
             Text("z", Modifier.offset(x = 3.dp, y = (-4).dp).graphicsLayer { alpha = a }, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
             Text("Z", Modifier.offset(x = 10.dp, y = (-10).dp).graphicsLayer { alpha = a2 }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            // stars twinkling above the head
+            Text("✦", Modifier.align(Alignment.TopStart).offset(x = 6.dp, y = (-4).dp).graphicsLayer { alpha = a3 }, fontSize = 8.sp, color = Color(0xFFFFD54F))
+            Text("✦", Modifier.align(Alignment.TopCenter).offset(x = (-2).dp, y = (-8).dp).graphicsLayer { alpha = a2 }, fontSize = 6.sp, color = Color(0xFFFFD54F))
         }
         return
     }
@@ -685,8 +694,6 @@ private fun Composer(value: String, onChange: (String) -> Unit, working: Boolean
                 }
                 val studio by Prefs.studio.flow.collectAsState()
                 IconButton({ Prefs.studio.value = !studio }, Modifier.size(40.dp)) { Icon(Icons.Filled.Brush, "Studio", tint = if (studio) cs.primary else cs.onSurfaceVariant) }
-                val pv by Prefs.provider.flow.collectAsState()
-                Text(Providers.byId(pv).name, fontSize = 12.sp, color = cs.onSurfaceVariant)
                 Spacer(Modifier.weight(1f))
                 if (working) {
                     FilledIconButton(onClick = onStop, modifier = Modifier.size(40.dp),
@@ -877,27 +884,30 @@ private fun Palette(cmds: List<Cmd>, onPick: (Cmd) -> Unit) {
 private fun OptionsSheet(onDismiss: () -> Unit) {
     val curId by Engine.currentId.collectAsState()
     val modelTick by Prefs.chatModelTick.collectAsState()
-    val model = remember(curId, modelTick) { Prefs.chatModel(curId) }
+    val prov by Prefs.provider.flow.collectAsState()
+    val cfgTick by Prefs.provCfg.flow.collectAsState()
+    val pv = Providers.byId(prov)
+    // Claude keeps its model per chat; the other AIs use the model set for them in Settings > AI
+    val model = remember(curId, modelTick, prov, cfgTick) { if (pv.id == "claude") Prefs.chatModel(curId) else Providers.model(pv) }
+    fun setModel(v: String) = if (pv.id == "claude") Prefs.setChatModel(curId, v) else Providers.set(pv.id, "model", v)
+    val models = if (pv.id == "claude") listOf("claude-haiku-5-5" to "Haiku 5.5", "fable" to "Fable 5.1", "opus" to "Opus 5.5", "sonnet" to "Sonnet 5.5", "haiku" to "Haiku",
+        "sonnet[1m]" to "Sonnet 1M", "opusplan" to "Opus plan") else pv.models.map { it to it }
     val effort by Prefs.effort.flow.collectAsState()
     val mode by Prefs.mode.flow.collectAsState()
-    val models = listOf("" to stringResource(R.string.default_label),
-        "fable" to "Fable 5.1", "opus" to "Opus 5.5", "sonnet" to "Sonnet 5.5", "claude-haiku-5-5" to "Haiku 5.5", "haiku" to "Haiku",
-        "sonnet[1m]" to "Sonnet 1M", "opusplan" to "Opus plan")
     val efforts = listOf("" to stringResource(R.string.default_label), "auto" to tr("Auto", "Oto"), "low" to "Low", "medium" to "Medium", "high" to "High", "xhigh" to "X-High", "max" to "Max")
     var effortInfo by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.options_title), style = MaterialTheme.typography.titleLarge)
             // switch the agent right here, one tap; each one keeps its own key in Settings > AI
-            val prov by Prefs.provider.flow.collectAsState()
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("claude", "openai", "deepseek").forEach { id -> val p = Providers.byId(id); FilterChip(prov == id, { Providers.select(id) }, { Text(p.name) }) }
+                listOf("claude", "openai", "deepseek").filter { id -> Providers.all.any { it.id == id } }.forEach { id -> val p = Providers.byId(id); FilterChip(prov == id, { Providers.select(id) }, { Text(p.name) }, leadingIcon = providerLogo(id)?.let { r -> { Icon(painterResource(r), null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface) } }) }
             }
             Text(stringResource(R.string.model_label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                models.forEach { (v, l) -> FilterChip(model == v, { Prefs.setChatModel(curId, v) }, { Text(l) }) }
+                models.forEach { (v, l) -> FilterChip(model == v, { setModel(v) }, { Text(l) }) }
             }
-            OutlinedTextField(model, { Prefs.setChatModel(curId, it.trim()) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.custom_model)) }, singleLine = true)
+            OutlinedTextField(model, { setModel(it.trim()) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.custom_model)) }, singleLine = true)
             Text(stringResource(R.string.effort_label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 efforts.forEach { (v, l) -> FilterChip(effort == v, { Prefs.effort.value = v }, { Text(l) }) }

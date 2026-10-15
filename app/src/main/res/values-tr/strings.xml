@@ -88,8 +88,8 @@
     <string name="usage_limit_title">Haftalık limit</string>
     <string name="usage_reset">Tümünü sıfırla</string>
     <string name="checking">Kontrol ediliyor…</string>
-    <string name="bridge_up">Köprü çalışıyor</string>
-    <string name="bridge_down">Köprüye ulaşılamıyor</string>
+    <string name="bridge_up">Claude Code çalışıyor</string>
+    <string name="bridge_down">Claude Code çalışmıyor</string>
     <string name="start_bridge">Başlat / yeniden başlat</string>
     <string name="connect_now">Bağlan</string>
     <string name="conn_details">Bağlantı ayrıntıları</string>

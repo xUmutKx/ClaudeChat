@@ -18,6 +18,8 @@ class App : Application() {
 
     companion object {
         lateinit var ctx: Application
+        /** The DeepSeek-only build (flavor "deepseek"): no Claude Code, no Termux. */
+        val dsOnly by lazy { ctx.packageName.endsWith(".deepseek") }
     }
 }
 
@@ -50,6 +52,7 @@ object Prefs {
     lateinit var theme: S       // system | light | dark | amoled
     lateinit var lang: S        // en | tr
     lateinit var overlay: S     // off | pill | line | curtain
+    lateinit var builtinLinux: B   // Claude Code runs in the app's own Ubuntu (Linux.kt) instead of Termux
     lateinit var mode: S        // default | acceptEdits | plan | bypassPermissions
     lateinit var cwd: S
     lateinit var attachDir: S   // where Download/projects appears inside Ubuntu
@@ -175,7 +178,7 @@ object Prefs {
         attachDir = S("attachDir", "/sdcard/Download/projects/uploads")
         // one-time: the old default (Download/projects) sent uploads to the wrong folder
         if (attachDir.value.isBlank() || attachDir.value == "/sdcard/Download/projects") attachDir.value = "/sdcard/Download/projects/uploads"
-        model = S("model", "")
+        model = S("model", "claude-haiku-5-5")
         effort = S("effort", "")
         slash = S("slash", "")
         port = S("port", "8787")
@@ -215,7 +218,8 @@ object Prefs {
         agentTools = B("agentTools", true)
         agentRoot = B("agentRoot", false)
         agentDir = S("agentDir", "/sdcard/Download/projects")
-        provider = S("provider", "claude")
+        provider = S("provider", if (App.dsOnly) "deepseek" else "claude")
+        builtinLinux = B("builtinLinux", false)
         provCfg = S("provCfg", "{}")
         setupMode = S("setupMode", "termux")
         studio = B("studio", false)

@@ -55,12 +55,21 @@ object Termux {
         val port = Prefs.port.value.filter(Char::isDigit).ifEmpty { "8787" }
         val token = cleanToken()
         // D keeps the full path out of this shell's own text: pkill -f would otherwise match this launcher and kill itself
-        return "D=/root/claudechat; mkdir -p \$D; : > \$D/bridge.log; echo $b64 | base64 -d > \$D/bridge.js; " +
-            (if (kill) "pkill -f '[c]laudechat/bridge.js'; sleep 0.3;" else "") +
+        // one restart loop per bridge: a new launch stops the old loop first, or the old loops keep starting node and fight for the port
+        val stop = if (kill) "if [ -f \$D/loop.pid ]; then kill \$(cat \$D/loop.pid) 2>/dev/null; sleep 0.3; fi; pkill -f '[c]laudechat/bridge.js'; sleep 0.3; "
+            else "if [ -f \$D/loop.pid ] && kill -0 \$(cat \$D/loop.pid) 2>/dev/null; then exit 0; fi; "
+        // Atomic Agent runs beside the bridge on its own port (the bridge has 8787)
+        val akey = Providers.field("atomic", "key").filter { it.isLetterOrDigit() || it in "-_" }
+        val atomic = if (akey.isEmpty()) "" else "command -v atomic-agent >/dev/null && ! curl -fs http://127.0.0.1:$ATOMIC_PORT/health >/dev/null && " +
+            "nohup atomic-agent serve --host 127.0.0.1 --port $ATOMIC_PORT --cwd \$HOME --api-key $akey --no-parent-exit >\$D/atomic.log 2>&1 & "
+        return "D=/root/claudechat; mkdir -p \$D; " + stop + ": > \$D/bridge.log; echo $b64 | base64 -d > \$D/bridge.js; echo \$\$ > \$D/loop.pid; " + atomic +
             // keep the bridge up: if node exits or crashes, the same loop starts it again after 2 s (the log keeps the reason)
             "while :; do CC_TOKEN=$token CC_PORT=$port node \$D/bridge.js" + (if (toFile) " >>\$D/bridge.log 2>&1" else "") +
             "; echo \"[\$(date +%T)] bridge stopped, restarting in 2 s\" >>\$D/bridge.log; sleep 2; done"
     }
+
+    /** The bridge loop as a script for any Ubuntu shell (Termux's proot-distro or the app's own Linux). */
+    fun bridgeScript(c: Context) = inner(c, toFile = true, kill = true)
 
     /** One line to paste into Termux by hand: needs no permission, root or allow-external-apps. */
     fun manualCmd(c: Context) =
@@ -71,6 +80,12 @@ object Termux {
     } catch (e: Exception) { false }
 
     private fun distro() = clean(Prefs.distro.value, ".").ifEmpty { "ubuntu" }
+
+    /** The Atomic Agent server's port: the bridge keeps 8787. */
+    const val ATOMIC_PORT = 8790
+
+    /** A command run inside the proot Ubuntu (Claude Code and Atomic Agent live there, not in Termux's own Android shell). */
+    fun inProot(cmd: String) = "proot-distro login ${distro()} -- bash -lc " + shQuote(cmd)
 
     private fun termuxUid(c: Context) = try { c.packageManager.getApplicationInfo("com.termux", 0).uid } catch (e: Exception) { -1 }
 
@@ -138,7 +153,7 @@ object Termux {
     } catch (e: Exception) { "" }
 
     /** Kills a bridge (and its restart loop) that is alive but not answering, through root. The pattern is bracketed so pkill never matches its own su shell. */
-    fun killBridge() { try { ProcessBuilder("su", "-c", "pkill -f '[n]ode /root/claudechat/bridge.js'").start().waitFor() } catch (e: Exception) { } }
+    fun killBridge() { if (Linux.use()) { Linux.stopBridge(); return }; try { ProcessBuilder("su", "-c", "pkill -f '[n]ode /root/claudechat/bridge.js'").start().waitFor() } catch (e: Exception) { } }
 
     /** [kill] = false (watchdog / auto start): never kill a bridge that may just be busy; a stale one makes the new one exit (EADDRINUSE). */
     fun startBridge(c: Context, kill: Boolean = true): Int? {
@@ -149,6 +164,14 @@ object Termux {
         Thread {
             try {
                 if (pingBlocking()) return@Thread
+                if (App.dsOnly) return@Thread
+                if (Linux.use()) { // the app's own Ubuntu: no Termux and no root involved
+                    note.value = tr("Starting built-in Linux…", "Yerleşik Linux başlatılıyor…")
+                    Linux.startBridge(app)
+                    repeat(90) { Thread.sleep(500); if (pingBlocking()) return@Thread }
+                    log = "Built-in Linux: the bridge did not answer.\n" + Linux.log.value.takeLast(600)
+                    return@Thread
+                }
                 // Termux's own context first: it is the same environment as the hand-typed command, which is known to work
                 // (proot under the su domain often fails); root launcher only as the fallback.
                 val viaTermux = installed(app) && granted(app)

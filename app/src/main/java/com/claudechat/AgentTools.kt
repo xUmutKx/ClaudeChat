@@ -33,7 +33,7 @@ object AgentTools {
         if (mode != "plan") {
             a.put(fn("Write", "Create or overwrite a file.", JSONObject().put("file_path", str("Path")).put("content", str("Whole file content")), listOf("file_path", "content")))
             a.put(fn("Edit", "Replace exact text in a file. Read the file first and copy old_string exactly.", JSONObject().put("file_path", str("Path")).put("old_string", str("Exact text to replace")).put("new_string", str("New text")).put("replace_all", JSONObject().put("type", "boolean")), listOf("file_path", "old_string", "new_string")))
-            a.put(fn("Bash", "Run a shell command in the project folder (the phone's shell).", JSONObject().put("command", str("Command line")).put("timeout", num("Seconds, default 120")), listOf("command")))
+            a.put(fn("Bash", "Run a shell command in the project folder (inside the built-in Ubuntu when it is set up, else the phone's shell).", JSONObject().put("command", str("Command line")).put("timeout", num("Seconds, default 120")), listOf("command")))
         }
         return a
     }
@@ -101,8 +101,11 @@ object AgentTools {
                     if (mode == "plan") return "Plan mode: commands are off."
                     val c = a.optString("command")
                     if (BAD.containsMatchIn(c)) return "Refused: this command looks destructive."
+                    // the app's own Ubuntu (proot) when set up: real bash, apt, git, node, no Termux; otherwise the phone's sh
+                    val pb = if (Linux.supported() && Linux.ready()) Linux.process("cd '${root().path.replace("'", "'\\''")}' && $c").redirectErrorStream(true) else null
                     val args = if (Prefs.agentRoot.value) listOf("su", "-c", "cd '${root().path}' && $c") else listOf("sh", "-c", c)
-                    val p = ProcessBuilder(args).directory(root()).redirectErrorStream(true).start()
+                    val p = (pb ?: ProcessBuilder(args).directory(root()).redirectErrorStream(true)).start()
+                    p.outputStream.close()
                     val out = StringBuilder()
                     val t = Thread { try { p.inputStream.bufferedReader().forEachLine { if (out.length < 60_000) out.appendLine(it) } } catch (e: Exception) { } }.also { it.start() }
                     val secs = a.optLong("timeout", 120).coerceIn(5, 600)

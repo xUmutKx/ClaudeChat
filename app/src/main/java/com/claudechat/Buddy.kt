@@ -498,18 +498,19 @@ private class BuddyView(c: Context, val s: Int, val w: Int, val h: Int) : View(c
     private var happy: Drawable? = null; private var wow: Drawable? = null; private var blanket: Drawable? = null; private var hat: Drawable? = null
     private var wear: List<Drawable> = emptyList()   // glasses, shoes, clothes: the same chosen pieces as the header and pill
     private var pc1: Drawable? = null; private var pc2: Drawable? = null
-    private var sleepFace: Drawable? = null        // asleep: navy body with closed eyes (the blink keeps the orange `closed`)
+    private var sleepFace: Drawable? = null        // asleep: the normal body with closed eyes
     private val blanketOn get() = Prefs.buddyBlanket.value == "1"
     private val idleOn get() = Prefs.buddyIdle.value == "1"
 
     init {
         val skin = Outfit.skinMatrix()
+        fun sleepFace0(id: Int) = ContextCompat.getDrawable(c, id)!!.mutate()   // asleep: default orange, no skin tint
         fun face(id: Int) = ContextCompat.getDrawable(c, id)!!.mutate().also { if (skin != null) it.colorFilter = android.graphics.ColorMatrixColorFilter(skin) }
         open = face(Mascots.r(R.drawable.ic_mascot18)); closed = face(Mascots.r(R.drawable.ic_mascot_sleep18)); x = face(R.drawable.ic_mascot_x18)
         happy = face(Mascots.r(R.drawable.ic_mascot_happy18)); wow = face(Mascots.r(R.drawable.ic_mascot_wow18))
         fun pcFace(alt: Boolean): Drawable = Mascots.pc(alt).map { face(it) }.let { l -> if (l.size == 1) l[0] else android.graphics.drawable.LayerDrawable(l.toTypedArray()) }
         pc1 = pcFace(false); pc2 = pcFace(true)
-        sleepFace = face(Mascots.r(R.drawable.ic_mascot_sleep_navy18))
+        sleepFace = sleepFace0(Mascots.r(R.drawable.ic_mascot_sleep18))
         blanket = ContextCompat.getDrawable(c, R.drawable.ic_blanket)!!.mutate()
         val hid = Outfit.hat(); hat = if (hid != 0) Mascots.hat(c, hid) else null
         wear = Wear.worn(false).map { ContextCompat.getDrawable(c, it)!!.mutate() }

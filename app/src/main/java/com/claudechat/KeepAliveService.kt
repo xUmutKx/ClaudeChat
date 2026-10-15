@@ -91,6 +91,7 @@ class KeepAliveService : Service() {
         }
         scope.launch(Dispatchers.IO) { // watchdog: checks the bridge whatever the chat state; a dead one is started again, with growing pauses
             delay(15_000)
+            if (App.dsOnly) return@launch // no bridge in the DeepSeek build
             var fails = 0
             var pause = 20_000L
             while (true) {
@@ -98,6 +99,9 @@ class KeepAliveService : Service() {
                     fails = 0; pause = 20_000L
                     if (Engine.bridge.value != 0) Engine.bridge.value = 200
                     if (Engine.overall.value == Status.Offline) Engine.overall.value = Status.Idle
+                } else if (Engine.buildBusy()) {
+                    // a Gradle build keeps the phone busy: a silent bridge is not a dead one, so nothing is killed or started during it
+                    pause = 20_000L
                 } else {
                     fails++
                     if (Engine.bridge.value != 0) Engine.bridge.value = -1
@@ -191,9 +195,9 @@ class KeepAliveService : Service() {
         val pc = atComputer()
         val asleep = lastSt == Status.Idle && !Engine.buildRunning.value
         val faces = if (pc) Mascots.pc(false)
-            else listOf(if (asleep) Mascots.r(R.drawable.ic_mascot_sleep_navy18) else Mascots.r(R.drawable.ic_mascot18))
+            else listOf(if (asleep) Mascots.r(R.drawable.ic_mascot_sleep18) else Mascots.r(R.drawable.ic_mascot18))
         val blanket = asleep && Prefs.buddyBlanket.value == "1"
-        val bm = Mascots.bitmap(this, faces, Outfit.hat(), blanket, if (pc) emptyList() else Wear.worn(asleep))
+        val bm = Mascots.bitmap(this, faces, Outfit.hat(), blanket, if (pc) emptyList() else Wear.worn(asleep), tint = !asleep)
         if (asleep) { // two drifting z's over the blanket, as in the buddy
             val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.argb(230, 150, 170, 220); typeface = android.graphics.Typeface.DEFAULT_BOLD; textSize = 15f }
             val cv = android.graphics.Canvas(bm); cv.drawText("z", 70f, 26f, p); p.textSize = 20f; cv.drawText("Z", 82f, 12f, p)

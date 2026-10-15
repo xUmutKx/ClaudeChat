@@ -11,8 +11,8 @@ android {
         applicationId = "com.umutk.claudechat"
         minSdk = 29
         targetSdk = 34
-        versionCode = 136
-        versionName = "0.10.87"
+        versionCode = 141
+        versionName = "0.10.92"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {
@@ -29,7 +29,17 @@ android {
     }
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
     buildFeatures { compose = true }
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    packaging {
+        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // proot must exist as a real file in nativeLibraryDir: Android 10+ only lets apps exec from there
+        jniLibs.useLegacyPackaging = true
+    }
+    flavorDimensions += "app"
+    productFlavors {
+        create("full") { dimension = "app" }
+        // DeepSeek only: own package and name (res in src/deepseek), installs next to Claude Chat
+        create("deepseek") { dimension = "app"; applicationIdSuffix = ".deepseek"; versionNameSuffix = "-ds" }
+    }
 }
 
 dependencies {

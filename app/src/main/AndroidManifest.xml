@@ -37,6 +37,10 @@
         <activity android:name=".BubbleChatActivity" android:exported="false" android:theme="@style/Theme.ClaudeChat.Bubble"
             android:taskAffinity="" android:excludeFromRecents="true" android:launchMode="singleInstance" android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
+        <activity android:name=".WebLoginActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
+        <activity android:name=".WebLoginActivity1" android:process=":web1" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
+        <activity android:name=".WebLoginActivity2" android:process=":web2" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
+        <activity android:name=".WebLoginActivity3" android:process=":web3" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>

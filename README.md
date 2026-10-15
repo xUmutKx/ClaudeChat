@@ -43,6 +43,10 @@ Claude Chat sets Claude Code up for you; you do not need any other app first.
 
 From then on, tapping *Start Claude* connects in one go.
 
+## No Termux
+
+Settings > Connection > details > Built-in Linux downloads Ubuntu into the app and runs the bridge, Atomic Agent and Ollama there. Sign-in pages for ChatGPT, Claude and Gemini are in the same place. Build the `deepseek` flavor for a DeepSeek-only app (`assembleDeepseekRelease`).
+
 ## The mascot
 
 The mascot has an idle, a working, a laptop and a sleeping look, with dozens of outfits, scenes and body colours. It shows in the pill, the notification, the chat header and as the floating buddy.

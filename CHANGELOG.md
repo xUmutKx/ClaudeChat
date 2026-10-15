@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.90
+- Built-in Linux: the app unpacks its own Ubuntu 24.04 (checked against Ubuntu's SHA256SUMS) and runs it with PRoot. No Termux needed. Settings > Connection > details has the setup button and a switch that runs the bridge there.
+- Atomic Agent and Ollama can be installed and started from the same place (Atomic Agent on port 8790).
+- Sign in to ChatGPT, Claude and Gemini on their websites inside the app; the login stays. Google may refuse sign-in in a WebView.
+- DeepSeek Chat: a second build (flavor `deepseek`) with only the DeepSeek provider and no bridge. It installs next to Claude Chat.
+
 ## 0.10.71
 - Balloon and pill open Settings directly (no detour through the chat).
 - Model and context line under the input is off by default; a switch in Settings > Claude turns it on.

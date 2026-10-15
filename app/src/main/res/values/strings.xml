@@ -88,8 +88,8 @@
     <string name="usage_limit_title">Weekly limit</string>
     <string name="usage_reset">Reset all</string>
     <string name="checking">Checking…</string>
-    <string name="bridge_up">Bridge is running</string>
-    <string name="bridge_down">Bridge is not reachable</string>
+    <string name="bridge_up">Claude Code is running</string>
+    <string name="bridge_down">Claude Code is not running</string>
     <string name="start_bridge">Start / restart</string>
     <string name="connect_now">Connect</string>
     <string name="conn_details">Connection details</string>

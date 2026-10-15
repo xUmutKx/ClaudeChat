@@ -346,13 +346,16 @@ object Engine {
     @Volatile var buildAlive = false
     /** The same build state as a flow, so the chat header can show "Compiling" while it runs. */
     val buildRunning = MutableStateFlow(false)
+    @Volatile private var buildSeenAt = 0L   // last time the bridge answered /build: an old "running" does not count
+    /** A Gradle build is running and the bridge answered recently: the bridge is busy, not dead. */
+    fun buildBusy() = buildRunning.value && System.currentTimeMillis() - buildSeenAt < 120_000L
     /** Seconds the running Gradle build has been going (read from its process by the bridge), or -1 when the bridge could not tell. */
     @Volatile var buildElapsed = -1
     private val buildSeen = HashMap<String, Long>()   // log file -> when this app first saw it running (fallback for the elapsed time)
     fun buildLog(): Triple<String, Int, String>? = try {
         http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("/build")).header("X-Token", Termux.cleanToken()).build()).execute().use { resp ->
             if (!resp.isSuccessful) null else JSONObject(resp.body!!.string()).let { o ->
-                buildAlive = o.optBoolean("alive"); buildRunning.value = buildAlive; buildElapsed = o.optInt("elapsed", -1)
+                buildAlive = o.optBoolean("alive"); buildRunning.value = buildAlive; buildElapsed = o.optInt("elapsed", -1); buildSeenAt = System.currentTimeMillis()
                 // only a full APK build counts here (<project>_build.log or the release builds' <project>_release.log): a Kotlin-only check (_compile.log) says "finished" without any file
                 if (o.optString("file").isEmpty() || !o.optString("file").let { it.endsWith("_build.log") || it.endsWith("_release.log") }) null else {
                     val f = o.getString("file"); val text = o.optString("text")
@@ -405,7 +408,8 @@ object Engine {
     /** HTTP status of the bridge, or -1 when unreachable. */
     suspend fun ping(): Int = withContext(Dispatchers.IO) {
         try {
-            http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build()
+            // a Gradle build can keep the bridge busy for several seconds: a late answer is not an error
+            http.newBuilder().callTimeout(8, TimeUnit.SECONDS).build()
                 .newCall(Request.Builder().url(url("/ping")).header("X-Token", Termux.cleanToken()).build())
                 .execute().use { it.code }
         } catch (e: IOException) { -1 }
@@ -479,7 +483,7 @@ object Engine {
 
     /** Looks at the bridge and, when it is down and auto-start is on, brings it up without any tap. */
     fun checkBridge() {
-        if (bridge.value == 0) return
+        if (bridge.value == 0 || App.dsOnly) return
         scope.launch {
             bridge.value = -2
             // a busy bridge (scanning /proc, big file lists) can miss one ping: only a few misses in a row mean it is gone
@@ -596,10 +600,13 @@ object Engine {
         val system = (if (Prefs.studio.value) Providers.STUDIO + "\n\n" else "") + (if (Prefs.agentTools.value)
             "You are a coding agent on the user's Android phone. Your project folder is ${AgentTools.root().path}; relative paths start there. Use the tools to read, search, edit and run things instead of guessing, and keep answers short." else "")
         if (system.isNotEmpty()) msgs.put(JSONObject().put("role", "system").put("content", system))
-        r.messages.value.filter { (it.role == Role.User || it.role == Role.Claude) && it.text.isNotBlank() }.takeLast(40)
+        r.messages.value.filter { (it.role == Role.User || it.role == Role.Claude) && it.text.isNotBlank() }.takeLast(if (pv.id == "deepseek") 400 else 40)   // a window that slides every message would break DeepSeek's prefix cache
             .forEach { msgs.put(JSONObject().put("role", if (it.role == Role.User) "user" else "assistant").put("content", it.text)) }
         val mode = Prefs.mode.value
         var tools: JSONArray? = if (Prefs.agentTools.value) AgentTools.specs(mode) else null
+        if (tools != null && pv.id == "ollama" && LocalModels.byTag(Providers.model(pv))?.tools == false) {
+            tools = null; add(r, Role.Note, tr0("This local model has no tool calling: it only chats. Pick a model marked 'tools' for files and commands.", "Bu yerel model araç çağıramıyor: sadece sohbet eder. Dosya ve komut için 'araç' işaretli bir model seç."))
+        }
         val client = http.newBuilder().connectTimeout(20, TimeUnit.SECONDS).build()
         var steps = 0
         while (steps++ < 30) {
@@ -610,6 +617,7 @@ object Engine {
                 if (tools != null && steps == 1 && Regex("\\b(400|404|422)\\b").containsMatchIn(e.message.orEmpty())) { tools = null; add(r, Role.Note, tr0("This model cannot use tools: answering without files and commands.", "Bu model araç kullanamıyor: dosya ve komut olmadan cevaplıyorum.")); continue }
                 throw e
             }
+            turn.usage?.let { u -> r.ctx.value = u.prompt; if (pv.id == "deepseek") r.cost.value += Providers.deepseekCost(Providers.model(pv), u) }
             if (turn.calls.isEmpty()) break
             val am = JSONObject().put("role", "assistant").put("content", if (turn.text.isEmpty()) JSONObject.NULL else turn.text)
             am.put("tool_calls", JSONArray(turn.calls.map { JSONObject().put("id", it.id).put("type", "function").put("function", JSONObject().put("name", it.name).put("arguments", it.args.ifBlank { "{}" })) }))

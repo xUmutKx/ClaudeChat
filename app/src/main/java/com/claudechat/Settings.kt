@@ -270,6 +270,8 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(if (bridge == -2) R.string.checking else if (up) R.string.bridge_up else R.string.bridge_down))
             }
+            val simple = Linux.supported() && !App.dsOnly
+            if (simple) LinuxSection { bridge = it } else {
             Button({
                 scope.launch {
                     bridge = -2
@@ -285,12 +287,13 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 SetupServer.command()?.let { clip.setText(AnnotatedString(it)); Termux.openTermux(ctx) }
             }, Modifier.fillMaxWidth()) { Text(tr("Repair the connection (paste once in Termux)", "Bağlantıyı onar (Termux'a bir kez yapıştır)")) }
             Hint(tr("If starting from here does not work, this copies one short line: paste it in Termux and everything is set up again.", "Buradan başlatma çalışmazsa bu, kısa bir satır kopyalar: Termux'a yapıştır, her şey yeniden kurulur."))
+            }
             if (bridge == 401) Hint(stringResource(R.string.bridge_401))
             if (!up && Termux.log.isNotBlank()) Hint(Termux.log.trim().takeLast(400))
 
-            TextButton({ det = !det }) { Text(stringResource(if (det) R.string.adv_hide else R.string.conn_details)) }
+            if (!simple) TextButton({ det = !det }) { Text(stringResource(if (det) R.string.adv_hide else R.string.conn_details)) }
             if (det) {
-            Sub(R.string.sec_termux)
+            if (!simple) { Sub(R.string.sec_termux)
             run {
             val inst = remember(tick) { Termux.installed(ctx) }
             Hint(stringResource(if (inst) R.string.termux_installed else R.string.termux_not_installed))
@@ -304,25 +307,8 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
             }) { Text(stringResource(R.string.root_setup)) }
             Hint(stringResource(R.string.termux_setup))
             CodeLine(Termux.SETUP_CMD)
-            Hint(tr("Atomic Agent runs local models through Termux. The install downloads its release archive into Termux. Atomic Agent lists macOS, Linux and Windows as supported, so the installer may stop on Android; the output shows in Termux.",
-                "Atomic Agent yerel modelleri Termux üzerinden çalıştırır. Kurulum sürüm arşivini Termux'a indirir. Atomic Agent'ın desteklenen platformları macOS, Linux ve Windows; kurulum Android'de durabilir, çıktı Termux'ta görünür."))
-            Button({
-                scope.launch {
-                    val err = withContext(Dispatchers.IO) { Termux.run(ctx, "curl -fsSL https://atomicagent.io/install | sh") }
-                    android.widget.Toast.makeText(ctx, err?.let { ctx.getString(it) } ?: tr("Install started in Termux. Watch Termux for progress.", "Kurulum Termux'ta başladı; ilerlemeyi Termux'tan izle."), android.widget.Toast.LENGTH_LONG).show()
-                }
-            }) { Text(tr("Install Atomic Agent", "Atomic Agent'ı kur")) }
-            Button({
-                scope.launch {
-                    // one random key, kept for the Atomic Agent provider; the server only listens on 127.0.0.1
-                    val key = Providers.field("atomic", "key").ifEmpty { java.util.UUID.randomUUID().toString() }
-                    Providers.set("atomic", "key", key)
-                    val cmd = "atomic-agent serve --host 127.0.0.1 --port 8787 --cwd \$HOME --api-key $key --no-parent-exit"
-                    val err = withContext(Dispatchers.IO) { Termux.run(ctx, cmd) }
-                    android.widget.Toast.makeText(ctx, err?.let { ctx.getString(it) } ?: tr("Atomic Agent server starting in Termux.", "Atomic Agent sunucusu Termux'ta başlıyor."), android.widget.Toast.LENGTH_LONG).show()
-                }
-            }) { Text(tr("Start Atomic Agent server", "Atomic Agent sunucusunu başlat")) }
-        }
+            }
+            }
 
             Sub(R.string.sec_manual)
             run {
@@ -535,11 +521,23 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 val prov by Prefs.provider.flow.collectAsState()
                 val cfgTick by Prefs.provCfg.flow.collectAsState()
                 Text(tr("Who answers in new messages", "Yeni mesajlara kim cevap versin"), style = MaterialTheme.typography.bodyLarge)
-                TextChoices(Providers.all.map { it.id to it.name }, prov) { Providers.select(it) }
+                ProviderCards(prov)
                 val p = Providers.byId(prov)
+                // Back steps through the provider/model choices made on this page before leaving it
+                val cur = remember(prov, cfgTick) { p.id to Providers.model(p) }
+                val hist = remember { mutableStateListOf<Pair<String, String>>() }
+                var last by remember { mutableStateOf(cur) }
+                var undoing by remember { mutableStateOf(false) }
+                var undoTick by remember { mutableIntStateOf(0) }
+                LaunchedEffect(cur) { if (cur != last) { if (!undoing) hist.add(last); undoing = false; last = cur } }
+                BackHandler(hist.isNotEmpty()) {
+                    val (pid, pm) = hist.removeAt(hist.lastIndex)
+                    undoing = true; Providers.select(pid); Providers.set(pid, "model", pm); undoTick++
+                }
                 Hint(tr(p.note, p.noteTr))
+                if (p.id == "atomic" || p.id == "ollama") LinuxServiceControl(p.id)
                 if (p.id != "claude") {
-                    androidx.compose.runtime.key(p.id) {
+                    androidx.compose.runtime.key(p.id, undoTick) {
                         var k by remember(p.id) { mutableStateOf(Providers.key(p.id)) }
                         var m by remember(p.id) { mutableStateOf(Providers.model(p)) }
                         var b by remember(p.id) { mutableStateOf(Providers.base(p)) }
@@ -571,20 +569,30 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                             val http = remember { okhttp3.OkHttpClient.Builder().connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS).readTimeout(0, java.util.concurrent.TimeUnit.SECONDS).build() }
                             fun refresh() { scope.launch(kotlinx.coroutines.Dispatchers.IO) { installed = Providers.ollamaModels(http); if (installed == null) status = tr("Ollama is not reachable at that address.", "Ollama bu adreste yok.") } }
                             LaunchedEffect(Unit) { refresh() }
-                            Text(tr("Installed models (tap to use)", "Yüklü modeller (kullanmak için dokun)"), style = MaterialTheme.typography.bodyLarge)
-                            val inst = installed
-                            if (inst != null && inst.isEmpty()) Hint(tr("Nothing installed yet. Pick one below and download it.", "Henüz yüklü model yok. Aşağıdan seçip indir."))
-                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                inst.orEmpty().forEach { mn -> FilterChip(m == mn, { m = mn; Providers.set(p.id, "model", mn) }, { Text(mn) }) }
-                            }
-                            Button({
-                                busy = true; status = tr("Starting…", "Başlıyor…")
+                            var pulling by remember { mutableStateOf("") }
+                            fun pull(t: String) {
+                                busy = true; pulling = t; status = tr("Checking Ollama…", "Ollama kontrol ediliyor…")
                                 scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                    val err = Providers.ollamaPull(http, m) { status = it }
-                                    status = err ?: tr("Downloaded: $m", "İndirildi: $m"); busy = false; refresh()
+                                    var up = Providers.ollamaModels(http) != null
+                                    if (!up && Linux.supported() && !App.dsOnly && Linux.ready()) {
+                                        if (Linux.exec("command -v ollama >/dev/null") != 0) status = tr("Ollama is not installed: press Install above.", "Ollama kurulu değil: yukarıdan Kur'a bas.")
+                                        else {
+                                            status = tr("Starting Ollama…", "Ollama başlatılıyor…"); Linux.service("ollama", Linux.OLLAMA_SERVE)
+                                            repeat(40) { if (!up) { kotlinx.coroutines.delay(1000); up = Providers.ollamaModels(http) != null } }
+                                        }
+                                    }
+                                    if (!up) {
+                                        if (!status.startsWith("Ollama is not installed") && !status.startsWith("Ollama kurulu")) status = tr("Ollama is not running. Press Start above (or run: ollama serve), then Download again.", "Ollama çalışmıyor. Yukarıdan Başlat'a bas (ya da: ollama serve), sonra tekrar İndir.")
+                                        busy = false; pulling = ""; return@launch
+                                    }
+                                    status = tr("Starting download…", "İndirme başlıyor…")
+                                    val err = Providers.ollamaPull(http, t) { status = it }
+                                    status = err ?: tr("Downloaded: $t", "İndirildi: $t"); busy = false; pulling = ""; refresh()
                                 }
-                            }, enabled = !busy && m.isNotBlank()) { Text(tr("Download $m", "$m indir")) }
+                            }
                             if (status.isNotEmpty()) Hint(status)
+                            LocalModelCards(m, installed, status, pulling, { m = it; Providers.set(p.id, "model", it) }) { pull(it) }
+                            if (LocalModels.byTag(m) == null) Button({ pull(m) }, enabled = !busy && m.isNotBlank()) { Text(tr("Download $m", "$m indir")) }
                             Hint(tr("Ollama must be running: in Termux/Ubuntu install it and run: ollama serve. Small models (1–4B) fit a phone; bigger ones belong on a computer: set its address above.", "Ollama çalışıyor olmalı: Termux/Ubuntu'da kur ve şunu çalıştır: ollama serve. Küçük modeller (1–4B) telefona sığar; büyükleri bilgisayarda çalıştırıp adresini yukarıya yaz."))
                         }
                         if (p.keyUrl.isNotEmpty()) TextButton({ ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(p.keyUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text(tr("Get a key", "Anahtar al")) }
@@ -597,6 +605,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                     SwitchRow(R.string.agent_on, R.string.agent_on_sub, Prefs.agentTools.flow.collectAsState().value) { Prefs.agentTools.value = it }
                     if (Prefs.agentTools.flow.collectAsState().value) {
                         OutlinedTextField(Prefs.agentDir.value, { Prefs.agentDir.value = it }, Modifier.fillMaxWidth(), label = { Text(tr("Folder the AI may work in", "Yapay zekânın çalışabileceği klasör")) }, singleLine = true)
+                        BashLinuxControl()
                         SwitchRow(R.string.agent_root, R.string.agent_root_sub, Prefs.agentRoot.flow.collectAsState().value) { Prefs.agentRoot.value = it }
                         if (!android.os.Environment.isExternalStorageManager()) {
                             Hint(tr("Files on shared storage need 'All files access'.", "Ortak depolamadaki dosyalar için 'Tüm dosyalara erişim' gerekir."))
