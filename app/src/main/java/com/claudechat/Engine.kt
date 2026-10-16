@@ -510,6 +510,7 @@ object Engine {
         r.shell.value = false
         try {
             val pv = Providers.current()
+            if (pv.id.startsWith("web:")) { web(r, pv); return }
             if (pv.id != "claude") { direct(r, pv); return }
             // the wizard's other two ways: no Termux, no bridge
             if (Prefs.setupMode.value == SetupMode.API) { apiChat(r); return }
@@ -530,6 +531,14 @@ object Engine {
             if (!currentCoroutineContext().isActive) return
             // the answer already arrived (or the user pressed stop): a late socket/stream error is not worth showing
             if (r.gotResult || !r.status.value.running) return
+            val pv = Providers.current()
+            if (pv.id != "claude" && e is IOException) {   // another AI: the bridge text would be wrong, show the real reason
+                fail(r, when (e) {
+                    is java.net.UnknownHostException, is ConnectException -> tr0("${pv.name}: cannot reach the server. Check the internet and the server address (Settings > AI).", "${pv.name}: sunucuya ulaşılamıyor. İnterneti ve sunucu adresini kontrol et (Ayarlar > Yapay zekâ).")
+                    is java.net.SocketTimeoutException -> tr0("${pv.name}: no answer in time, try again.", "${pv.name}: zamanında cevap gelmedi, tekrar dene.")
+                    else -> e.message ?: e.javaClass.simpleName
+                }, Status.Error); return
+            }
             if (e is IOException && e !is ConnectException) {
                 fail(r, appStr(R.string.err_dropped), Status.Offline); return
             }
@@ -591,6 +600,27 @@ object Engine {
         val v = try { a.answer.await() } finally { approval.value = null }
         if (v == 2) alwaysOk.add(r.id + tool)
         return v != 0
+    }
+
+    private val webSeen = HashSet<String>()
+
+    /** A website account answers through its hidden WebView (see WebAsk). The site keeps the conversation; a chat that starts on it midway gets the recent messages pasted in once. */
+    private suspend fun web(r: Run, pv: Providers.P) {
+        setDetail(r, pv.name)
+        val q = pv.id.split(':'); val site = WebAccounts.site(q.getOrElse(1) { "" }); val slot = q.getOrElse(2) { "0" }.toIntOrNull() ?: 0
+        val msgs = r.messages.value.filter { (it.role == Role.User || it.role == Role.Claude) && it.text.isNotBlank() }
+        var prompt = msgs.lastOrNull { it.role == Role.User }?.text.orEmpty()
+        if (webSeen.add(pv.id + r.id) && msgs.size > 1) prompt = "Earlier in this chat:\n" + msgs.dropLast(1).takeLast(10).joinToString("\n") { (if (it.role == Role.User) "User: " else "You: ") + it.text.take(600) } + "\n\nNow answer this:\n" + prompt
+        var acc = ""
+        r.curId = null
+        val err = WebAsk.ask(site.id, slot, r.id, prompt) { t -> if (t.length > acc.length && t.startsWith(acc)) { appendClaude(r, t.substring(acc.length)); acc = t } }
+        when (err) {
+            null -> {}
+            "login" -> { webSeen.remove(pv.id + r.id); return fail(r, tr0("${pv.name} is not signed in. Open Settings > AI, tap the account and sign in.", "${pv.name} giriş yapılmamış. Ayarlar > AI içinde hesaba dokunup giriş yap."), Status.Error, action = true) }
+            "send" -> return fail(r, tr0("${pv.name}: could not send the message through the website. Open the account to check it.", "${pv.name}: mesaj siteden gönderilemedi. Hesabı açıp kontrol et."))
+            else -> return fail(r, tr0("${pv.name}: no answer in time.", "${pv.name}: zamanında cevap gelmedi."))
+        }
+        if (r.status.value == Status.Working) finish(r, Status.Done)
     }
 
     /** Another AI answers directly over the internet; with tools on it can read and change files in the agent folder and run commands, in the app itself. */
@@ -817,7 +847,7 @@ object Engine {
                     if (canRetry && err.contains("No conversation found", true)) return true
                     if (canRetry && badModel(r.id, err)) { add(r, Role.Note, "Model '${Prefs.chatModel(r.id)}' failed, using default."); Prefs.setChatModel(r.id, ""); return true }
                     // the bridge's spawn of `claude` fails with ENOENT when Claude Code is not installed in Termux
-                    if (err.contains("ENOENT")) fail(r, appStr(R.string.err_no_claude)) else fail(r, appStr(R.string.err_exit, code, err))
+                    if (err.contains("ENOENT")) fail(r, appStr(if (Linux.use()) R.string.err_no_claude_linux else R.string.err_no_claude).also { if (Linux.use()) reinstallClaude() }) else fail(r, appStr(R.string.err_exit, code, err))
                 }
             }
         }

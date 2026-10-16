@@ -903,6 +903,11 @@ private fun OptionsSheet(onDismiss: () -> Unit) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("claude", "openai", "deepseek").filter { id -> Providers.all.any { it.id == id } }.forEach { id -> val p = Providers.byId(id); FilterChip(prov == id, { Providers.select(id) }, { Text(p.name) }, leadingIcon = providerLogo(id)?.let { r -> { Icon(painterResource(r), null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface) } }) }
             }
+            val accts = remember(cfgTick) { if (App.dsOnly) emptyList() else WebAccounts.list() }
+            if (accts.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                accts.forEach { a -> val wid = "web:${a.site.id}:${a.slot}"
+                    FilterChip(prov == wid, { Providers.select(wid) }, { Text(a.name) }, leadingIcon = { Icon(painterResource(a.site.logo), null, Modifier.size(18.dp)) }) }
+            }
             Text(stringResource(R.string.model_label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 models.forEach { (v, l) -> FilterChip(model == v, { setModel(v) }, { Text(l) }) }

@@ -150,8 +150,10 @@ fun ProviderCards(selected: String) {
     val accts = remember(cfg) { WebAccounts.list() }
     Text(tr("Website accounts", "Site hesapları"), Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
     accts.forEach { a ->
-        ProvCard(false, { WebAccounts.open(ctx, a) }, { Logo(a.site.logo, Icons.Filled.Language) }, a.name, tr("Signed in on the website", "Sitede giriş"), true) {
-            IconButton({ WebAccounts.remove(a); Providers.set("web", "ts", System.nanoTime().toString()) }) { Icon(Icons.Filled.Delete, null) }
+        val wid = "web:${a.site.id}:${a.slot}"
+        ProvCard(selected == wid, { Providers.select(wid) }, { Logo(a.site.logo, Icons.Filled.Language) }, a.name, tr("Signed in on the website", "Sitede giriş"), true) {
+            IconButton({ WebAccounts.open(ctx, a) }) { Icon(Icons.Filled.Language, null) }
+            IconButton({ WebAccounts.remove(a); if (selected == wid) Providers.select("claude"); Providers.set("web", "ts", System.nanoTime().toString()) }) { Icon(Icons.Filled.Delete, null) }
         }
     }
     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

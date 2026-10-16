@@ -29,6 +29,12 @@ fun linuxJob(label: String, block: () -> String?) {
     }.start()
 }
 
+/** Claude Code vanished from the built-in Linux (bridge spawn ENOENT): put it back in the background. */
+fun reinstallClaude() = linuxJob(tr("Reinstalling Claude Code…", "Claude Code yeniden kuruluyor…")) {
+    val c = Linux.exec(Linux.CLAUDE_INSTALL)
+    if (c != 0) tr("Claude Code install stopped (exit $c). ", "Claude Code kurulumu durdu (çıkış $c). ") + Linux.tail(6) else null
+}
+
 private fun startClaude(ctx: Context) {
     Prefs.builtinLinux.value = true
     Termux.startBridge(ctx.applicationContext as android.app.Application, kill = true)
@@ -45,10 +51,18 @@ fun LinuxSection(onState: (Int) -> Unit) {
     val ready = remember(busy) { Linux.ready() }
     Button({
         if (!ready) linuxJob(tr("Starting…", "Başlıyor…")) { Linux.install()?.also { return@linuxJob it }; startClaude(ctx); null }
-        else startClaude(ctx)
+        else linuxJob(tr("Starting…", "Başlıyor…")) {
+            // Claude Code can vanish from the Linux (spawn ENOENT): put it back before starting
+            if (!App.dsOnly && Linux.exec("command -v claude >/dev/null") != 0) {
+                Linux.status.value = tr("Reinstalling Claude Code…", "Claude Code yeniden kuruluyor…")
+                val c = Linux.exec(Linux.CLAUDE_INSTALL)
+                if (c != 0) return@linuxJob tr("Claude Code install stopped (exit $c). ", "Claude Code kurulumu durdu (çıkış $c). ") + Linux.tail(6)
+            }
+            startClaude(ctx); null
+        }
         scope.launch { onState(-2); repeat(90) { delay(1000); val p = Engine.ping(); if (p == 200) { onState(p); return@launch } }; onState(-1) }
     }, Modifier.fillMaxWidth().height(52.dp), enabled = !busy) {
-        Text(if (!ready) tr("Set up (about 400 MB)", "Kur (yaklaşık 400 MB)") else tr("Start / restart", "Başlat / yeniden başlat"))
+        Text(if (!ready) tr("Set up", "Kur") else tr("Start / restart", "Başlat / yeniden başlat"))
     }
     if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall)
     if (busy) Text(log.takeLast(400), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -58,18 +72,34 @@ fun LinuxSection(onState: (Int) -> Unit) {
 fun installService(id: String) {
     if (Linux.busy.value) return
     Linux.installing.value = id
-    linuxJob(tr("Installing…", "Kuruluyor…")) {
-        try {
-            val atomic = id == "atomic"
-            val c = Linux.exec(if (atomic) Linux.ATOMIC_INSTALL else Linux.OLLAMA_INSTALL)
-            if (c != 0) return@linuxJob tr("Not installed (exit $c)", "Kurulmadı (çıkış $c)")
-            if (atomic) {
-                val key = Providers.field("atomic", "key").ifEmpty { java.util.UUID.randomUUID().toString() }
-                Providers.set("atomic", "key", key); Linux.service("atomic", Linux.atomicServe(key))
-            } else Linux.service("ollama", Linux.OLLAMA_SERVE)
-            null
-        } finally { Linux.installing.value = "" }
+    linuxJob(tr("Installing…", "Kuruluyor…")) { try { installBody(id) } finally { Linux.installing.value = "" } }
+}
+
+private fun installBody(id: String): String? {
+    val atomic = id == "atomic"
+    Linux.failLog.value = ""
+    if (atomic) {
+        Linux.exec(Linux.ATOMIC_FETCH)
+        val tgz = java.io.File(Linux.root(), "root/.atomic-dl/a.tgz")
+        if (tgz.exists() && tgz.length() > 0) {
+            Linux.exec("echo '[atomic] unpacking'")
+            runCatching { tgz.inputStream().use { Tar.untgz(it, java.io.File(Linux.root(), "opt/atomic")) } }
+                .onFailure { Linux.exec("echo '[atomic] unpack failed: ${it.message?.replace("'", "")}'") }
+            tgz.delete()
+        }
     }
+    val c = Linux.exec(if (atomic) Linux.ATOMIC_FINISH else Linux.OLLAMA_INSTALL)
+    if (c != 0) { Linux.failLog.value = Linux.tail(14); return tr("Not installed (exit $c)", "Kurulmadı (çıkış $c)") }
+    if (atomic) {
+        val key = Providers.field("atomic", "key").ifEmpty { java.util.UUID.randomUUID().toString() }
+        Providers.set("atomic", "key", key); Linux.service("atomic", Linux.atomicServe(key))
+        Thread.sleep(5000)
+        if (Linux.exec("curl -fs http://127.0.0.1:${Termux.ATOMIC_PORT}/health >/dev/null") != 0) {
+            Linux.failLog.value = Linux.tail(14)
+            return tr("Installed, but the server does not answer on port ${Termux.ATOMIC_PORT}", "Kuruldu ama sunucu ${Termux.ATOMIC_PORT} portunda yanıt vermiyor")
+        }
+    } else Linux.service("ollama", Linux.OLLAMA_SERVE)
+    return null
 }
 
 fun removeService(id: String) {
@@ -88,23 +118,34 @@ fun LinuxServiceControl(id: String) {
     val status by Linux.status.collectAsState()
     var tick by remember { mutableIntStateOf(0) }
     if (!Linux.supported() || App.dsOnly) return
-    if (!Linux.ready()) { Text(tr("Set up Claude Code first (Connection).", "Önce Claude Code'u kur (Bağlantı)."), style = MaterialTheme.typography.bodySmall); return }
     val atomic = id == "atomic"
+    val name = if (atomic) "Atomic Agent" else "Ollama"
+    if (!Linux.ready()) {
+        Button({
+            if (Linux.busy.value) return@Button
+            linuxJob(tr("Starting…", "Başlıyor…")) { Linux.install()?.also { return@linuxJob it }; Linux.installing.value = id; try { installBody(id) } finally { Linux.installing.value = "" } }
+        }, Modifier.fillMaxWidth().height(52.dp), enabled = !busy) { Text(tr("Install $name", "$name kur")) }
+        Text(if (busy) Linux.log.collectAsState().value.trimEnd().substringAfterLast('\n').takeLast(120).ifBlank { status } else tr("First installs the built-in Linux, then $name.", "Önce yerleşik Linux kurulur, sonra $name."), style = MaterialTheme.typography.bodySmall)
+        return
+    }
     val running = remember(tick, busy) { Linux.running(id) }
-    val installed = remember(tick, busy) { Linux.exec("command -v ${if (atomic) "atomic-agent" else "ollama"} >/dev/null") == 0 }
+    // checked off the main thread, and never "installed" while a job runs
+    val installed by produceState(false, tick, busy) { value = !busy && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Linux.exec("command -v ${if (atomic) "atomic-agent" else "ollama"} >/dev/null") == 0 } }
     val mine = Linux.installing.collectAsState().value == id
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (busy && mine) OutlinedButton({ Linux.cancel() }) { Text(tr("Cancel", "İptal")) }
-        else if (!installed) Button({ installService(id) }, enabled = !busy) { Text(tr("Install", "Kur")) }
-        else OutlinedButton({ removeService(id); tick++ }, enabled = !busy) { Text(tr("Remove", "Kaldır")) }
+        else if (!installed) Button({ installService(id) }, enabled = !busy) { Text(tr("Install $name", "$name kur")) }
+        else OutlinedButton({ removeService(id); tick++ }, enabled = !busy) { Text(tr("Remove $name", "$name kaldır")) }
         Button({
             if (running) Linux.stop(id) else if (atomic) {
                 val key = Providers.field("atomic", "key").ifEmpty { java.util.UUID.randomUUID().toString() }
                 Providers.set("atomic", "key", key); Linux.service("atomic", Linux.atomicServe(key))
             } else Linux.service("ollama", Linux.OLLAMA_SERVE)
             tick++
-        }, enabled = !busy && installed) { Text(if (running) tr("Stop", "Durdur") else tr("Start", "Başlat")) }
+        }, enabled = !busy && installed) { Text(if (running) tr("Stop $name", "$name durdur") else tr("Start $name", "$name başlat")) }
     }
+    val fail by Linux.failLog.collectAsState()
+    if (!busy && fail.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer { Text(fail, style = MaterialTheme.typography.bodySmall) }
     if (busy && mine) Text(Linux.log.collectAsState().value.trimEnd().substringAfterLast('\n').substringAfterLast('\r').takeLast(120).ifBlank { status }, style = MaterialTheme.typography.bodySmall)
     else if (status.isNotBlank() && busy) Text(status, style = MaterialTheme.typography.bodySmall)
 }

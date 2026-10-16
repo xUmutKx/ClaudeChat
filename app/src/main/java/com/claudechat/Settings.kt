@@ -270,7 +270,16 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(if (bridge == -2) R.string.checking else if (up) R.string.bridge_up else R.string.bridge_down))
             }
-            val simple = Linux.supported() && !App.dsOnly
+            // off = the Termux login path (the way it always worked); on = the app's own built-in Linux
+            var builtin by remember { mutableStateOf(Prefs.builtinLinux.value) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(tr("Built-in Linux", "Yerleşik Linux"), style = MaterialTheme.typography.bodyLarge)
+                    Text(tr("Off: start through Termux on the phone", "Kapalı: telefondaki Termux üzerinden başlat"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(builtin, { Prefs.builtinLinux.value = it; builtin = it })
+            }
+            val simple = builtin && Linux.supported() && !App.dsOnly
             if (simple) LinuxSection { bridge = it } else {
             Button({
                 scope.launch {
@@ -350,7 +359,7 @@ fun SettingsScreen(onBack: () -> Unit, onGuide: () -> Unit, onLang: () -> Unit, 
         if (sc == "vibe") VibeSettings()
         if (sc == "tasks") { LaunchedEffect(Unit) { cat = ""; onTasks() } }
 
-        if (sc == "usage") { BuildCard(); UsageCard() }
+        if (sc == "usage") { BuildCard(); UsageCard(); StorageCard() }
 
         if (sc == "look") Section(R.string.sec_appearance) {
             Choices(listOf("system" to R.string.theme_system, "light" to R.string.theme_light, "dark" to R.string.theme_dark, "amoled" to R.string.theme_amoled), theme) { Prefs.theme.value = it }

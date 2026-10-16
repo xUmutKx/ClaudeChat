@@ -29,6 +29,7 @@
     <string name="err_token">The bridge rejected the token. Restart the bridge from Settings.</string>
     <string name="err_exit">Claude exited with code %1$d.\n%2$s</string>
     <string name="err_no_claude">Claude Code (the claude command) is missing in Termux. Run: npm install -g @anthropic-ai/claude-code. Then use Settings → Repair the connection.</string>
+    <string name="err_no_claude_linux">Claude Code is missing in the built-in Linux. It is being reinstalled now; try again in a minute or two.</string>
     <string name="notif_channel_keep">Keep-alive</string>
     <string name="notif_channel_done">Finished replies</string>
     <string name="notif_keep_title">Claude Chat is running</string>

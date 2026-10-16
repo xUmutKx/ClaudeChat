@@ -29,6 +29,7 @@
     <string name="err_token">Köprü anahtarı reddetti. Ayarlar\'dan köprüyü yeniden başlat.</string>
     <string name="err_exit">Claude %1$d koduyla kapandı.\n%2$s</string>
     <string name="err_no_claude">Termux\'ta Claude Code (claude komutu) yok. Termux\'ta çalıştır: npm install -g @anthropic-ai/claude-code. Sonra Ayarlar → Bağlantıyı onar bölümünü kullan.</string>
+    <string name="err_no_claude_linux">Yerleşik Linux\'ta Claude Code yok. Şimdi yeniden kuruluyor; bir iki dakika sonra tekrar dene.</string>
     <string name="notif_channel_keep">Açık tutma</string>
     <string name="notif_channel_done">Biten cevaplar</string>
     <string name="notif_keep_title">Claude Chat çalışıyor</string>

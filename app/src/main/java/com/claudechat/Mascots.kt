@@ -18,13 +18,14 @@ import org.json.JSONObject
  * orange so the body colour setting still recolours it. The character follows the provider unless one is picked by hand ("auto").
  */
 object Mascots {
-    val IDS = listOf("claude", "whale", "rabbit", "star", "bolt", "cat", "owl", "llama", "ghost")
+    val IDS = listOf("claude", "whale", "rabbit", "star", "bolt", "cat", "owl", "llama", "ghost", "crab", "gem", "robot", "fox", "atom")
 
     // ---- body colour: every character has its own, with its own default -----------------------------------------------
 
     /** What each character looks like before anyone changes it. */
     val DEFAULT_SKIN = mapOf("claude" to "orange", "whale" to "blue", "rabbit" to "white", "star" to "yellow", "bolt" to "teal",
-        "cat" to "gray", "owl" to "brown", "llama" to "cream", "ghost" to "purple")
+        "cat" to "gray", "owl" to "brown", "llama" to "cream", "ghost" to "purple",
+        "crab" to "red", "gem" to "blue", "robot" to "gray", "fox" to "orange", "atom" to "green")
 
     private fun skins() = try { JSONObject(Prefs.mascotSkins.value) } catch (e: Exception) { JSONObject() }
 
@@ -59,6 +60,7 @@ object Mascots {
         "owl" to Fit(0f, 1f, .8f),         // between the ear tufts, head at y 7
         "llama" to Fit(4f, 1f, .55f),      // the head is the right-hand part
         "ghost" to Fit(0f, 0f, 1f),
+        "crab" to Fit(0f, 3f, .6f), "gem" to Fit(0f, 1f, .7f), "robot" to Fit(0f, 2f, .7f), "fox" to Fit(0f, 3f, .7f), "atom" to Fit(2f, 1f, .5f),
     )
 
     fun fit(c: String = current()): Fit = FIT[c] ?: Fit(0f, 0f, 1f)

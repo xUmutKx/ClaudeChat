@@ -22,32 +22,38 @@ object Providers {
         // no key at all: a free shared service, and the GitHub login you already have
         P("pollinations", "Free, no account", "https://text.pollinations.ai/openai", "openai", "No account and no key: a free shared service, it can be slow", "Hesap ve anahtar yok: ücretsiz ortak servis, yavaş olabilir", "teal", "", false, "star",
             listOf("openai", "openai-fast")),
-        P("llm7", "Free: DeepSeek, GPT-OSS, Gemma", "https://api.llm7.io/v1", "DeepSeek-V4-Flash-0731", "No account and no key (LLM7 free tier, rate limited). Gemini and ChatGPT need their own key or login", "Hesap ve anahtar yok (LLM7 ücretsiz katman, sınırlı). Gemini ve ChatGPT kendi anahtarını ya da girişini ister", "blue", "https://token.llm7.io/", false, "whale",
+        P("llm7", "Free: DeepSeek, GPT-OSS, Gemma", "https://api.llm7.io/v1", "DeepSeek-V4-Flash-0731", "No account and no key (LLM7 free tier, rate limited). Gemini and ChatGPT need their own key or login", "Hesap ve anahtar yok (LLM7 ücretsiz katman, sınırlı). Gemini ve ChatGPT kendi anahtarını ya da girişini ister", "blue", "https://token.llm7.io/", false, "crab",
             listOf("DeepSeek-V4-Flash-0731", "gpt-oss:20b", "gemma4:31b", "glm-5.2", "GLM-5.3-Flash", "minimax-m2.7", "mistral-Nemo-Instruct-2407", "nemotron-3-nano:30b", "codestral-latest")),
         P("github", "GitHub Models", "https://models.github.ai/inference", "openai/gpt-4.1-mini", "Free with your GitHub login: nothing to copy", "GitHub girişinle ücretsiz: kopyalanacak bir şey yok", "gray", "", false, "cat",
             listOf("openai/gpt-4.1-mini", "openai/gpt-4.1", "openai/gpt-4o-mini", "meta/llama-3.3-70b-instruct", "deepseek/deepseek-r1", "microsoft/phi-4", "mistral-ai/mistral-small-2503", "xai/grok-3-mini"), "gh"),
         // names from api-docs.deepseek.com (2026-10): deepseek-flash = V4.1 Flash, deepseek-v4-pro; the old deepseek-chat/-reasoner aliases were due to retire 2026-07-24
         P("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-flash", "Paid API key (very cheap, with prompt caching)", "Ücretli API anahtarı (çok ucuz, önbellekli)", "blue", "https://platform.deepseek.com/api_keys", true, "whale",
             listOf("deepseek-flash", "deepseek-v4-pro")),
-        P("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.5-flash", "Free key from Google AI Studio", "Google AI Studio'dan ücretsiz anahtar", "purple", "https://aistudio.google.com/apikey", true, "star",
+        P("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.5-flash", "Free key from Google AI Studio", "Google AI Studio'dan ücretsiz anahtar", "purple", "https://aistudio.google.com/apikey", true, "gem",
             listOf("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite")),
         P("ollama", "Ollama (local)", "http://127.0.0.1:11434/v1", "qwen2.5:1.5b", "Models that run on your own phone or computer: no key, no internet once downloaded", "Kendi telefonunda ya da bilgisayarında çalışan modeller: anahtar yok, indirdikten sonra internet yok", "gray", "", false, "llama",
             LocalModels.all.map { it.tag }),
-        P("grok", "Grok (xAI)", "https://api.x.ai/v1", "grok-4", "Paid API key from xAI", "xAI'dan ücretli API anahtarı", "gray", "https://console.x.ai/", true, "bolt",
+        P("grok", "Grok (xAI)", "https://api.x.ai/v1", "grok-4", "Paid API key from xAI", "xAI'dan ücretli API anahtarı", "gray", "https://console.x.ai/", true, "robot",
             listOf("grok-4", "grok-3-mini")),
         P("groq", "Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "Free key, very fast", "Ücretsiz anahtar, çok hızlı", "teal", "https://console.groq.com/keys", true, "bolt",
             listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant")),
         P("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "deepseek/deepseek-chat-v3-0324:free", "Many models, some free (':free')", "Çok model, bazıları ücretsiz (':free')", "green", "https://openrouter.ai/keys", true, "rabbit"),
-        P("mistral", "Mistral", "https://api.mistral.ai/v1", "mistral-small-latest", "Free tier key", "Ücretsiz katman anahtarı", "red", "https://console.mistral.ai/api-keys", true, "cat",
+        P("mistral", "Mistral", "https://api.mistral.ai/v1", "mistral-small-latest", "Free tier key", "Ücretsiz katman anahtarı", "red", "https://console.mistral.ai/api-keys", true, "fox",
             listOf("mistral-small-latest", "mistral-large-latest")),
         P("openai", "ChatGPT", "https://api.openai.com/v1", "gpt-4o-mini", "Paid API key", "Ücretli API anahtarı", "gray", "https://platform.openai.com/api-keys", true, "owl",
             listOf("gpt-4o-mini", "gpt-4o")),
-        P("atomic", "Atomic Agent (this phone)", "http://127.0.0.1:8790/v1", "atomic-agent", "Local agent inside the built-in Linux: no internet needed for the model once it is set up", "Yerleşik Linux'ta çalışan yerel ajan: kurulduktan sonra model için internet gerekmez", "teal", "", true, "bolt"),
+        P("atomic", "Atomic Agent (this phone)", "http://127.0.0.1:8790/v1", "atomic-agent", "Local agent inside the built-in Linux: no internet needed for the model once it is set up", "Yerleşik Linux'ta çalışan yerel ajan: kurulduktan sonra model için internet gerekmez", "teal", "", false, "atom"),
         P("custom", "Custom", "", "", "Any OpenAI-compatible server (set address and model)", "OpenAI uyumlu herhangi bir sunucu (adres ve model gir)", "yellow", "", false, "ghost"),
     // the DeepSeek build keeps "Custom" too: any OpenAI-compatible address + key + model (a friend's or own server)
     ).let { l -> if (App.dsOnly) l.filter { it.id == "deepseek" || it.id == "custom" } else l }
 
-    fun byId(id: String) = all.firstOrNull { it.id == id } ?: all[0]
+    fun byId(id: String) = all.firstOrNull { it.id == id } ?: web(id) ?: all[0]
+    /** A signed-in website account is the provider "web:<site>:<slot>". */
+    private fun web(id: String): P? {
+        if (!id.startsWith("web:")) return null
+        val q = id.split(':'); val a = WebAccounts.Acct(WebAccounts.site(q.getOrElse(1) { "" }), q.getOrElse(2) { "0" }.toIntOrNull() ?: 0)
+        return P(id, a.name, "", "", "Signed in on the website", "Sitede giriş", "gray", "", false, "star")
+    }
     fun current() = byId(Prefs.provider.value)
 
     private fun cfg() = try { JSONObject(Prefs.provCfg.value) } catch (e: Exception) { JSONObject() }
@@ -87,7 +93,12 @@ object Providers {
         return (u.hit * hit + m * miss + u.out * out) / 1_000_000.0
     }
 
-    private fun friendly(p: P, code: Int, msg: String): String = if (p.id != "deepseek") "${p.name} $code: $msg" else "DeepSeek $code: " + when (code) {
+    private fun friendly(p: P, code: Int, msg: String): String = if (p.id != "deepseek") "${p.name} $code: " + when (code) {
+        401, 403 -> "the API key is missing, wrong or not allowed (Settings > AI). $msg"
+        404 -> "model or address not found, check them in Settings > AI. $msg"
+        429 -> "rate limit or quota reached, wait a moment. $msg"
+        else -> msg
+    } else "DeepSeek $code: " + when (code) {
         401 -> "the API key is wrong (Settings > AI)."
         402 -> "no balance left. Top up at platform.deepseek.com."
         429 -> "rate limit reached, wait a moment and send again."
